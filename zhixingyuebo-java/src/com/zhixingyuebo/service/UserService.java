@@ -2,16 +2,18 @@ package com.zhixingyuebo.service;
 
 import com.zhixingyuebo.entity.User;
 import com.zhixingyuebo.entity.Vehicle;
-import com.zhixingyuebo.exception.InvalidPlateNumberException;
 import com.zhixingyuebo.exception.ZhiXingYueBoException;
 
-import java.util.List;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 手机号登录认证、名下车辆绑定业务接口
  */
 public interface UserService {
+
+    int MONTHLY_CARD_DAYS = 30;
 
     /**
      * 手机号码快速认证登录
@@ -33,6 +35,8 @@ public interface UserService {
      */
     User getUserById(Integer userId) throws ZhiXingYueBoException;
     LocalDateTime getMonthlyCardUntil(Integer userId) throws ZhiXingYueBoException;
+    BigDecimal getMonthlyCardPrice() throws ZhiXingYueBoException;
+    LocalDateTime buyOrRenewMonthlyCard(Integer ownerId) throws ZhiXingYueBoException;
     void setMonthlyCardUntil(Integer adminId, Integer ownerId, LocalDateTime until) throws ZhiXingYueBoException;
 
     /**

@@ -7,6 +7,8 @@ import java.time.LocalDateTime;
  * 资金变动只读审计流水实体（对应 tb_account_flow）
  */
 public class AccountFlow {
+    public static final String MONTHLY_CARD_PAYMENT = "月卡扣费";
+
 
     private Long flowId;
     private Integer accountId;

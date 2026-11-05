@@ -30,6 +30,7 @@ public class OwnerDriver extends User {
         System.out.println("│  5. 车辆离场阶梯算费与自动扣款 (核心事务一)            │");
         System.out.println("│  6. 新能源充电桩插枪充电与拔枪结算 (核心事务二)        │");
         System.out.println("│  7. 【创新 A】启动 IoT 智能充电桩多线程进度模拟器      │");
+        System.out.println("│  8. 查询、办理或续费停车月卡                          │");
         System.out.println("│  0. 安全注销并返回登录首页                            │");
         System.out.println(FormatUtil.CYAN + "└────────────────────────────────────────────────────────┘" + FormatUtil.RESET);
     }

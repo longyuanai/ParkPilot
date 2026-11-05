@@ -4,6 +4,7 @@ import argparse
 import csv
 from PIL import Image
 from docx import Document
+from docx.enum.section import WD_ORIENT, WD_SECTION_START
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
@@ -26,6 +27,8 @@ fingerprint = (evidence / "source.sha256").read_text(encoding="ascii").strip()
 assert len(fingerprint) == 64
 schema = summary["test.schema"]
 assert summary["evidence.schema"] == schema
+navicat_marker = evidence / "navicat.schema"
+navicat = navicat_marker.is_file() and navicat_marker.read_text(encoding="ascii").strip() == schema
 
 doc = Document()
 section = doc.sections[0]
@@ -91,8 +94,47 @@ def heading(text, level=1):
     return doc.add_heading(text, level=level)
 
 def page_start(title):
-    doc.add_page_break()
+    heading(title).paragraph_format.page_break_before = True
+
+def section_start(title, landscape):
+    layout = doc.add_section(WD_SECTION_START.NEW_PAGE)
+    layout.different_first_page_header_footer = False
+    layout.orientation = WD_ORIENT.LANDSCAPE if landscape else WD_ORIENT.PORTRAIT
+    width, height = (11, 8.5) if landscape else (8.5, 11)
+    layout.page_width, layout.page_height = Inches(width), Inches(height)
     heading(title)
+
+def navicat_comparison(console_path, navicat_path):
+    comparison = doc.add_table(rows=1, cols=2)
+    comparison.autofit = False
+    comparison.alignment = WD_TABLE_ALIGNMENT.CENTER
+    row = comparison.rows[0]
+    row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
+    panels = [
+        ("控制台离场小票", console_path, 4.35, 4.14),
+        ("Navicat Premium 17  只读查询", navicat_path, 5.12, 4.90),
+    ]
+    for index, (label, path, cell_width, image_width) in enumerate(panels):
+        comparison.columns[index].width = Inches(cell_width)
+        cell = row.cells[index]
+        cell.width = Inches(cell_width)
+        cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+        title = cell.paragraphs[0].add_run(label)
+        title.bold = True
+        title.font.color.rgb = RGBColor.from_string("115663")
+        picture = cell.add_paragraph().add_run().add_picture(str(path), width=Inches(image_width))
+        picture._inline.docPr.set("descr", label)
+        if index == 0:
+            # 保留原始验收 PNG，在 Word 中只展示其中的控制台小票区域。
+            left, top, right, bottom = (28, 120, 704, 596)
+            with Image.open(path) as image:
+                full_width, full_height = image.size
+            crop = OxmlElement("a:srcRect")
+            for side, fraction in (("l", left / full_width), ("t", top / full_height),
+                                   ("r", 1 - right / full_width), ("b", 1 - bottom / full_height)):
+                crop.set(side, str(round(fraction * 100000)))
+            picture._inline.xpath(".//pic:blipFill")[0].insert(1, crop)
+            picture.height = Inches(image_width * (bottom - top) / (right - left))
 
 def table(headers, rows, widths):
     result = doc.add_table(rows=0, cols=len(headers))
@@ -131,7 +173,7 @@ kicker.runs[0].font.color.rgb = RGBColor.from_string("115663")
 title = body("智行悦泊智慧停车\n与充电管理系统", "Title")
 title.paragraph_format.space_after = Pt(14)
 body("课程设计与实现报告", "Subtitle")
-intro = body("本项目实现车主预约与进出场、新能源充电结算、运维消警和物业审计。系统将设备状态、订单和钱包流水写入 MySQL，并使用独立数据库验证并发扣款与异常回滚。")
+intro = body("本项目实现车主预约与进出场、停车月卡、充电结算、运维消警和物业审计。系统将设备状态、订单和钱包流水写入 MySQL，并使用独立数据库验证并发扣款与异常回滚。")
 intro.paragraph_format.space_before = Pt(22)
 intro.paragraph_format.space_after = Pt(31)
 table(("项目资料", "内容"), [
@@ -158,8 +200,8 @@ body("系统用 DECIMAL 和 BigDecimal 保存和计算金额。唯一索引基�
 
 page_start("二  停车计费与状态一致性")
 heading("预约与离场", 2)
-body("预约持有 30 分钟，服务在车位行锁内检查车位是否可用。有效期内仅预约人能泊入，入场成功后清除预约。车辆行锁和车位行锁控制并发，数据库唯一约束校验最终写入。")
-body("离场先验证车牌归属和在场记录，再核对是否有未结充电单。停车费、钱包扣减、审计流水、车位释放和出场状态在同一事务提交。余额不足或流水写入报错时事务回滚。")
+body("预约保留 30 分钟，期间仅预约人可泊入。入场在车辆和车位行锁内执行，成功后清除预约。数据库唯一约束防止重复在场记录。")
+body("离场先核对车牌归属、在场记录和待结充电单。扣费、流水、车位释放和出场记录一起提交，余额不足或写入失败时回滚。")
 heading("计费口径", 2)
 table(("场景", "计算结果"), [
     ("停放 90 分钟", "前 30 分钟免费，60 分钟按 1 小时计费，4.00 元"),
@@ -167,9 +209,12 @@ table(("场景", "计算结果"), [
     ("跨日停车 20.5 小时", "前半小时免费，两日各计 10 小时，合计 80.00 元"),
     ("月卡有效", "离场金额 0.00 元，保留月卡免停状态和零金额流水"),
 ], (2.20, 4.70))
+heading("月卡办理与续费", 2)
+body("车主在菜单 8 查询并确认扣款。演示价为每 30 天 100.00 元，可在启动前配置。首办或过期重办从办理时刻起算，未过期续费从原到期时间顺延。")
+body("办理与离场均先锁定钱包，再核对有效期。月卡扣款、延期和流水一起提交。管理员可登记有效期。")
 heading("充电和运维", 2)
-body("已绑定的新能源车辆须泊入目标桩对应车位后才能开桩。拔枪结算以实际电量和每度电价计费。故障将进行中订单切换到中断待结算，并保留在场车辆。技师消警时按剩余订单恢复设备状态。结算和维修分别决定设备是否可用。")
-body("后台充电模拟线程每两秒刷新一次电量进度，达到目标后通过原充电服务归档和扣费。日报按结算日期汇总，便于核对当天停车收入和充电收入。")
+body("新能源车泊入对应车位后开桩，按实际电量结算。故障时原订单转为待结算，保留设备和车位占用。消警时按待结订单恢复设备状态。")
+body("后台线程每两秒更新电量，到达目标后自动结算。日报汇总停车、充电和月卡收入。")
 
 page_start("三  验收方法与结果")
 body(f"本轮自动化通过 {len(results)} 项。测试启动器使用随机 MySQL 测试库，为各用例加载样例数据。业务库执行前后指纹一致，测试库在完成后清理。")
@@ -180,10 +225,13 @@ table(("测试范围", "实际校验"), [
     ("A-01 与 B-01", "后台进度、自动结算、CSV 编码与跨日隔离"),
     ("F-01 至 F-08", "并发结算、钱包流水、故障回滚、月卡免停"),
     ("S-01 至 S-08", "业务库保护、所有权、预约过期、并发抢位、充电和故障联动"),
+    ("M-01 至 M-05", "自助办卡与续期、拒绝与回滚、并发扣款、日报及价格配置"),
 ], (2.06, 4.84))
 heading("复核入口", 2)
 body("新环境执行初始化 SQL 并填写本机数据库配置，再使用 run.bat 进入控制台。旧库先备份、停用旧程序并核查重复记录，之后执行升级 SQL。")
-body("verify_tests.bat 运行完整回归。报告附图由本轮 Swing 验收界面直接导出，左侧保留实际控制台输出，右侧显示 JDBC 查询的执行前后数据。压缩包附带结果清单与截图原文件。")
+body("verify_tests.bat 运行完整回归。验收界面导出控制台输出和 JDBC 查询前后快照。压缩包附带结果清单与截图文件。")
+if navicat:
+    body("TC-02 在本轮隔离库复现离场后，用 Navicat 只读查询停车记录与资金流水。报告并排展示控制台小票和查询结果。")
 
 cases = [
     ("TC-01", "多角色登录", "以预置手机号登录实际控制台，核对车主菜单、绑定车辆数量和钱包余额。"),
@@ -193,12 +241,22 @@ cases = [
     ("TC-05", "故障接单与消警", "B-0202 的过温报警形成 E01 工单，运维技师认领并记录处理结果，维修后设备恢复。"),
     ("TC-06", "非法输入恢复", "依次输入非法字符、越界序号和非正金额。控制台给出重试提示，并接受后续合法输入。"),
     ("A-01", "后台充电模拟", "守护线程采集并显示 2.50 度和 5.00 度的进度。达到目标后自动归档，按 7.50 元扣费。"),
-    ("S-07", "消警时保留占用", "已有订单在故障时转为待结。消警后拒绝第二单，原订单结算后释放桩，停车位仍由原车辆占用。"),
+    ("M-01", "月卡自助办理和续费", "车主在菜单 8 查看 100.00 元报价。取消时保留资产，两次确认分别完成办卡和续期，余额从 500.00 元降至 300.00 元。月卡生效后停车免扣费。"),
 ]
 for index, (case, title, description) in enumerate(cases, 1):
-    page_start(f"运行记录 {index:02d}  {title}")
-    body(description)
+    page_title = f"运行记录 {index:02d}  {title}"
+    if navicat and case in ("TC-02", "TC-03"):
+        section_start(page_title, landscape=case == "TC-02")
+    else:
+        page_start(page_title)
     path = evidence / "screenshots" / f"{case}.png"
+    body(description)
+    if navicat and case == "TC-02":
+        navicat_comparison(path, evidence / "screenshots" / "TC-02-Navicat.png")
+        caption = body("图 02  TC-02  控制台小票与 Navicat 查询  |  同轮独立库", "Caption")
+        caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        body("以离场时刻核对 tb_parking_record 与 tb_account_flow。查询返回一条对应的扣费流水，实收 4.00 元，余额变动为 −4.00 元。")
+        continue
     with Image.open(path) as image:
         width, height = image.size
         assert width >= 1200 and height > 300
@@ -214,4 +272,4 @@ destination = project / "docs" / "智行悦泊智慧停车系统实训设计与�
 destination.parent.mkdir(parents=True, exist_ok=True)
 doc.save(destination)
 print(f"DOCX={destination}")
-print(f"EVIDENCE_IMAGES={len(cases)}")
+print(f"EVIDENCE_IMAGES={len(cases) + int(navicat)}")

@@ -76,7 +76,13 @@ public class CsvExportUtil {
             }
         }
 
-        BigDecimal totalGrossIncome = totalParkingIncome.add(totalChargingIncome);
+        BigDecimal totalMonthlyCardIncome = BigDecimal.ZERO;
+        for (AccountFlow flow : accountFlows) {
+            if (AccountFlow.MONTHLY_CARD_PAYMENT.equals(flow.getBizType())) {
+                totalMonthlyCardIncome = totalMonthlyCardIncome.subtract(flow.getDiffAmount());
+            }
+        }
+        BigDecimal totalGrossIncome = totalParkingIncome.add(totalChargingIncome).add(totalMonthlyCardIncome);
 
         // 使用 BufferedWriter 写入标准 CSV
         try (FileOutputStream fos = new FileOutputStream(csvFile);
@@ -91,13 +97,14 @@ public class CsvExportUtil {
             writer.newLine();
             writer.write("导出生成日期," + DateUtil.format(java.time.LocalDateTime.now()));
             writer.newLine();
-            writer.write(String.format("全日总营收（元）,¥%s,停车总收费,¥%s (已结%d车次),充电总收费,¥%s (累计%s度 / %d次)",
+            writer.write(String.format("全日总营收（元）,¥%s,停车总收费,¥%s (已结%d车次),充电总收费,¥%s (累计%s度 / %d次),月卡总收费,¥%s",
                     totalGrossIncome.setScale(2).toPlainString(),
                     totalParkingIncome.setScale(2).toPlainString(),
                     totalParkingCount,
                     totalChargingIncome.setScale(2).toPlainString(),
                     totalKwh.setScale(2).toPlainString(),
-                    totalChargingCount));
+                    totalChargingCount,
+                    totalMonthlyCardIncome.setScale(2).toPlainString()));
             writer.newLine();
             writer.newLine();
 

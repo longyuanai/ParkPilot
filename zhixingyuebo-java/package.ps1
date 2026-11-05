@@ -12,7 +12,14 @@ if ($summary['test.passed'] -ne 'true' -or $summary['evidence.schema'] -ne $summ
     $summary['test.schema.deleted'] -ne 'true' -or $verifiedHash -ne (Get-ProjectFingerprint $project)) {
     throw '请先运行 verify_tests.ps1 -ExportEvidence，并确认本版代码验收通过。'
 }
-$shots = @(Get-ChildItem -LiteralPath (Join-Path $acceptance 'screenshots') -Filter '*.png' -File)
+$shotFolder = Join-Path $acceptance 'screenshots'
+$navicatMarker = Join-Path $acceptance 'navicat.schema'
+$navicatCurrent = (Test-Path -LiteralPath $navicatMarker -PathType Leaf) -and
+    (Get-Content -LiteralPath $navicatMarker -Raw).Trim() -eq $summary['test.schema']
+if (!$navicatCurrent -or !(Test-Path -LiteralPath (Join-Path $shotFolder 'TC-02-Navicat.png') -PathType Leaf)) {
+    throw '请按 README 补齐本轮验收库的 TC-02 Navicat 截图后再打包。'
+}
+$shots = @(Get-ChildItem -LiteralPath $shotFolder -Filter '*.png' -File)
 if ($shots.Count -lt 6 -or $shots.Count -gt 9) { throw '提交报告要求 6 到 9 张真实验收截图。' }
 
 function Read-ZipText($Entry) {
@@ -71,6 +78,7 @@ $proof = @(
     ('Isolated test schema ' + $summary['test.schema'])
     ('Original database fingerprint match ' + $summary['production.unchanged'])
     ('Isolated schema removed ' + $summary['test.schema.deleted'])
+    ('Navicat TC-02 captured ' + $navicatCurrent.ToString().ToLowerInvariant())
 )
 [IO.File]::WriteAllLines((Join-Path $docs '验收摘要.txt'), $proof, [Text.Encoding]::UTF8)
 if ((Get-ProjectFingerprint $source) -ne $verifiedHash) { throw '归档源码与已验收版本不一致。' }

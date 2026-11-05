@@ -7,7 +7,7 @@ $fingerprint = Get-ProjectFingerprint $PSScriptRoot
 . (Join-Path $PSScriptRoot 'java-tools.ps1')
 $javaTools = Get-JavaTools
 $classPath = (Join-Path $PSScriptRoot 'bin') + ';' + (Join-Path $PSScriptRoot 'lib\mysql-connector-j-8.1.0.jar')
-$runArgs = @('-Dfile.encoding=UTF-8','-Duser.timezone=Asia/Shanghai')
+$runArgs = @('-Dfile.encoding=UTF-8','-Duser.timezone=Asia/Shanghai','-Dzhixing.monthlyCard.price=100.00')
 if ($ForceFailure) { $runArgs += @('-Dzhixing.forceFailure=true','-Dzhixing.acceptance.dir=build/negative-acceptance') }
 $runArgs += @('-cp',$classPath,'com.zhixingyuebo.test.TestDatabaseRunner')
 if ($Evidence) { $runArgs += '--evidence' }

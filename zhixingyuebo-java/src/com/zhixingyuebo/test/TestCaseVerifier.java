@@ -49,6 +49,7 @@ public final class TestCaseVerifier {
     private static final String CHARGE = "SELECT order_id,user_id,kwh_amount,total_cost,order_status FROM tb_charging_order ORDER BY order_id";
     private static final String FLOW = "SELECT account_id,before_balance,after_balance,diff_amount FROM tb_account_flow ORDER BY flow_id DESC LIMIT 3";
     private static final String PILE = "SELECT pile_id,pile_status FROM tb_charging_pile ORDER BY pile_id";
+    private static final String CARD = "SELECT user_id,monthly_card_until FROM tb_user WHERE user_id IN (1,2) ORDER BY user_id";
 
     public static void main(String[] args) {
         if (Arrays.asList(args).contains("--probe-guard")) {
@@ -79,15 +80,7 @@ public final class TestCaseVerifier {
             owner.showMenu();
             if (Boolean.getBoolean("zhixing.forceFailure")) require(false, "故意失败，用于验证退出码");
         }, MONEY);
-        run("TC-02", "停车离场四元扣款", () -> {
-            entryTime(1,90);
-            ParkingRecord result=parking.processExit("川A88888",1);
-            money(result.getTotalFee(),"4.00"); money(accounts.getAccount(1).getBalance(),"496.00");
-            require(spots.findById(1).getSpotStatus()==0,"释放车位");
-            require(records.findById(1L).getExitTime()!=null,"出场持久化");
-            require(count("SELECT COUNT(*) FROM tb_account_flow WHERE account_id=1 AND diff_amount=-4.00")==1,"单笔流水");
-            TicketPrinter.printParkingTicket(result,users.getVehicleByPlate("川A88888"),"A-0101",bd("500"),bd("496"));
-        }, MONEY,PARK,FLOW);
+        run("TC-02", "停车离场四元扣款", TestCaseVerifier::verifyParkingExit, MONEY,PARK,FLOW);
         run("TC-03", "停车余额不足完整回滚", () -> {
             entryTime(2,1230);
             expectInsufficient(() -> parking.processExit("川A66666",2));
@@ -319,12 +312,105 @@ public final class TestCaseVerifier {
             audit(1);
             System.out.println("管理员登记有效期，90 分钟停车免停，钱包保持 500.00 元，审计流水连续。");
         },MONEY,PARK,FLOW);
+        run("M-01", "控制台办理、取消与续费月卡", () -> {
+            LocalDateTime earliest = LocalDateTime.now().withNano(0);
+            String first = runConsole("1\n13800000001\n8\n0\n\n8\n1\n\n0\n0\n");
+            require(first.contains("已取消月卡办理") && first.contains("月卡办理成功")
+                    && first.contains("¥100.00"), "控制台显示报价、取消和成功");
+            LocalDateTime initial = users.getMonthlyCardUntil(1);
+            require(initial != null && !initial.isBefore(earliest.plusDays(30))
+                    && !initial.isAfter(LocalDateTime.now().plusDays(30)), "首次购买自当时起生效 30 天");
+            money(accounts.getAccount(1).getBalance(), "400");
+            String second = runConsole("1\n13800000001\n8\n1\n\n0\n0\n");
+            require(second.contains("月卡办理成功"), "控制台续费成功");
+            require(initial.plusDays(30).equals(users.getMonthlyCardUntil(1)), "在原有效期基础上续期 30 天");
+            money(accounts.getAccount(1).getBalance(), "300");
+            require(count("SELECT COUNT(*) FROM tb_account_flow WHERE account_id=1 AND biz_type='月卡扣费'") == 2,
+                    "两次确认对应两笔流水");
+            entryTime(1,90);
+            money(parking.processExit("川A88888",1).getTotalFee(), "0");
+            audit(1);
+            for (String line : (first + "\n" + second).split("\\R")) {
+                if (line.contains("本次月卡费用") || line.contains("已取消月卡办理")
+                        || line.contains("月卡办理成功")) System.out.println(line);
+            }
+            System.out.println("核对两笔 100.00 元扣款、续期 30 天及离场免停。");
+        }, MONEY,CARD,FLOW);
+        run("M-02", "过期月卡重办、余额不足与角色限制", () -> {
+            sql("UPDATE tb_user SET monthly_card_until = '2020-01-01 00:00:00' WHERE user_id IN (1,2)");
+            LocalDateTime expired = users.getMonthlyCardUntil(2);
+            expectBusiness(() -> users.buyOrRenewMonthlyCard(3), "车主");
+            String refused = runConsole("1\n13800000002\n8\n1\n\n0\n0\n");
+            require(refused.contains("余额不足") && !refused.contains("道闸状态"), "余额提示与办卡场景一致");
+            require(expired.equals(users.getMonthlyCardUntil(2)), "余额不足保留旧有效期");
+            money(accounts.getAccount(2).getBalance(), "50");
+            require(count("SELECT COUNT(*) FROM tb_account_flow WHERE account_id=2") == 1, "余额不足无新流水");
+            LocalDateTime earliest = LocalDateTime.now().withNano(0);
+            LocalDateTime renewed = users.buyOrRenewMonthlyCard(1);
+            require(!renewed.isBefore(earliest.plusDays(30)) && !renewed.isAfter(LocalDateTime.now().plusDays(30)),
+                    "过期后从办理时间重新计算");
+            audit(1);
+        }, MONEY,CARD,FLOW);
+        run("M-03", "月卡扣款和延期后流水故障回滚", () -> {
+            LocalDateTime initial = LocalDateTime.now().plusDays(1).withNano(0);
+            users.setMonthlyCardUntil(4,1,initial);
+            installFailure();
+            try { expectSqlFailure(() -> users.buyOrRenewMonthlyCard(1)); }
+            finally { sql("DROP TRIGGER reject_test_flow"); }
+            money(accounts.getAccount(1).getBalance(), "500");
+            require(initial.equals(users.getMonthlyCardUntil(1)), "回滚有效期");
+            require(count("SELECT COUNT(*) FROM tb_account_flow WHERE account_id=1 AND biz_type='月卡扣费'") == 0,
+                    "失败不留下流水");
+            audit(1);
+        }, MONEY,CARD,FLOW);
+        run("M-04", "并发续费串行与日报对账", () -> {
+            LocalDateTime initial = LocalDateTime.now().plusDays(1).withNano(0);
+            users.setMonthlyCardUntil(4,1,initial);
+            int successes = parallel(8, () -> users.buyOrRenewMonthlyCard(1), true);
+            require(successes == 5, "500 元余额最多续费五次");
+            require(initial.plusDays(150).equals(users.getMonthlyCardUntil(1)), "并发续期累计 150 天");
+            money(accounts.getAccount(1).getBalance(), "0");
+            require(count("SELECT COUNT(*) FROM tb_account_flow WHERE account_id=1 AND biz_type='月卡扣费'") == 5,
+                    "五笔成功扣款对应五笔流水");
+            audit(1);
+            Path report = Paths.get(CsvExportUtil.exportDailyReport(output.resolve("monthly-card").toString()));
+            String csv = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
+            require(csv.contains("全日总营收（元）,¥500.00,") && csv.contains("月卡总收费,¥500.00"), "日报收款分类与合计");
+            System.out.println("八路并发成功五次，钱包为 0.00 元，月卡收费与日报总额均为 500.00 元。");
+        }, MONEY,CARD,FLOW);
+        run("M-05", "自定义月卡价格与非法价格拦截", () -> {
+            String configured = runConsole("1\n13800000001\n8\n1\n\n0\n0\n", "37.25");
+            require(configured.contains("¥37.25") && configured.contains("月卡办理成功"), "配置价格用于报价和办理");
+            money(accounts.getAccount(1).getBalance(), "462.75");
+            LocalDateTime until = users.getMonthlyCardUntil(1);
+            String invalid = runConsole("1\n13800000001\n8\n\n0\n0\n", "1.005");
+            require(invalid.contains("最多两位小数"), "拒绝非法价格");
+            money(accounts.getAccount(1).getBalance(), "462.75");
+            require(until.equals(users.getMonthlyCardUntil(1)), "非法价格不改变有效期");
+            audit(1);
+        }, MONEY,CARD,FLOW);
         boolean passed=RESULTS.stream().allMatch(r -> r.passed);
         StringBuilder tsv=new StringBuilder("id\tresult\ttitle\n");
         for(Result result:RESULTS) tsv.append(result.id).append('\t').append(result.passed?"PASS":"FAIL").append('\t').append(result.title).append('\n');
         Files.write(output.resolve("results.tsv"),tsv.toString().getBytes(StandardCharsets.UTF_8));
         System.out.println((passed?"ALL PASS ":"FAILED ")+RESULTS.stream().filter(r -> r.passed).count()+"/"+RESULTS.size());
         return passed;
+    }
+
+    static void replayParkingExit(Checked fixture) throws Exception {
+        fixture.run();
+        verifyParkingExit();
+    }
+
+    private static void verifyParkingExit() throws Exception {
+        entryTime(1,90);
+        ParkingRecord result = parking.processExit("川A88888",1);
+        money(result.getTotalFee(),"4.00");
+        money(accounts.getAccount(1).getBalance(),"496.00");
+        require(spots.findById(1).getSpotStatus()==0,"释放车位");
+        require(records.findById(1L).getExitTime()!=null,"出场持久化");
+        require(count("SELECT COUNT(*) FROM tb_account_flow WHERE account_id=1 AND diff_amount=-4.00")==1,"单笔流水");
+        TicketPrinter.printParkingTicket(result,users.getVehicleByPlate("川A88888"),"A-0101",bd("500"),bd("496"));
     }
 
     private static void run(String id,String title,Checked body,String... queries) throws Exception {
@@ -349,6 +435,10 @@ public final class TestCaseVerifier {
     }
 
     private static String runConsole(String input) throws Exception {
+        return runConsole(input, "100.00");
+    }
+
+    private static String runConsole(String input, String monthlyCardPrice) throws Exception {
         DBUtil.assertIsolatedTestDatabase();
         Path capture = Files.createTempFile(output, "console-", ".log");
         Path java = Paths.get(System.getProperty("java.home"), "bin", "java.exe");
@@ -359,6 +449,7 @@ public final class TestCaseVerifier {
         builder.environment().put("ZXYB_DB_CONFIG", System.getProperty("zhixing.db.config"));
         builder.environment().put("ZXYB_JDBC_USERNAME", System.getProperty("zhixing.jdbc.username"));
         builder.environment().put("ZXYB_JDBC_PASSWORD", System.getProperty("zhixing.jdbc.password"));
+        builder.environment().put("ZXYB_MONTHLY_CARD_PRICE", monthlyCardPrice);
         builder.redirectErrorStream(true).redirectOutput(capture.toFile());
         Process process = builder.start();
         try {

@@ -19,9 +19,19 @@ public class UserDaoImpl implements UserDao {
 
     @Override
     public LocalDateTime findMonthlyCardUntil(Integer userId) throws SQLException {
+        return findMonthlyCardUntil(userId, false);
+    }
+
+    @Override
+    public LocalDateTime findMonthlyCardUntilForUpdate(Integer userId) throws SQLException {
+        return findMonthlyCardUntil(userId, true);
+    }
+
+    private LocalDateTime findMonthlyCardUntil(Integer userId, boolean forUpdate) throws SQLException {
+        String sql = "SELECT monthly_card_until FROM tb_user WHERE user_id=? AND is_deleted=0";
+        if (forUpdate) sql += " FOR UPDATE";
         Connection conn = DBUtil.getConnection();
-        try (PreparedStatement ps = conn.prepareStatement(
-                "SELECT monthly_card_until FROM tb_user WHERE user_id=? AND is_deleted=0")) {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, userId);
             try (ResultSet rs = ps.executeQuery()) {
                 Timestamp until = rs.next() ? rs.getTimestamp(1) : null;

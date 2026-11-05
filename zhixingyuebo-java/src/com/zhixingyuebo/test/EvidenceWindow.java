@@ -14,7 +14,7 @@ import javax.imageio.ImageIO;
 /** 只读验收界面：展示本次原服务调用输出及真实 JDBC SELECT 前后快照。 */
 public final class EvidenceWindow {
     private static final Set<String> EXPORTED_CASES = new HashSet<>(Arrays.asList(
-            "TC-01", "TC-02", "TC-03", "TC-04", "TC-05", "TC-06", "A-01", "S-07"));
+            "TC-01", "TC-02", "TC-03", "TC-04", "TC-05", "TC-06", "A-01", "M-01"));
     private EvidenceWindow() { }
 
     /** 从本次 Swing 验收界面直接导出像素，内容来自已运行用例的输出和数据库快照。 */
@@ -99,12 +99,19 @@ public final class EvidenceWindow {
         SwingUtilities.invokeAndWait(() -> {
             JFrame frame=new JFrame("智行悦泊 真实运行验收 黄家威 20233130174");
             frame.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-            frame.addWindowListener(new WindowAdapter(){@Override public void windowClosed(WindowEvent event){closed.countDown();}});
+            javax.swing.Timer timeout = new javax.swing.Timer(15 * 60 * 1000, event -> frame.dispose());
+            timeout.setRepeats(false);
+            frame.addWindowListener(new WindowAdapter() {
+                @Override public void windowClosed(WindowEvent event) {
+                    timeout.stop();
+                    closed.countDown();
+                }
+            });
             JPanel panel=new JPanel(new BorderLayout(8,8));panel.setBorder(BorderFactory.createEmptyBorder(12,12,12,12));
             JLabel title=new JLabel("智行悦泊 真实 JDBC 验收  |  "+schema+"  |  所有数据来自独立测试库");
             title.setFont(new Font("Microsoft YaHei UI",Font.BOLD,18));panel.add(title,BorderLayout.NORTH);
             JTabbedPane tabs=new JTabbedPane();tabs.setFont(new Font("Microsoft YaHei UI",Font.PLAIN,16));
-            Set<String> selected=new HashSet<>(Arrays.asList("TC-01","TC-02","TC-03","TC-04","TC-05","F-01","F-05","A-01","B-01"));
+            Set<String> selected=new HashSet<>(Arrays.asList("TC-01","TC-02","TC-03","TC-04","TC-05","F-01","F-05","A-01","B-01","M-01"));
             for(TestCaseVerifier.Result result:results)if(selected.contains(result.id)) {
                 JPanel item=new JPanel(new BorderLayout(6,6));
                 JLabel heading=new JLabel(result.id+"  "+result.title+"  "+(result.passed?"PASS":"FAIL"));
@@ -113,8 +120,9 @@ public final class EvidenceWindow {
                 split.setResizeWeight(0.51);item.add(split,BorderLayout.CENTER);tabs.addTab(result.id,item);
             }
             panel.add(tabs,BorderLayout.CENTER);
-            panel.add(new JLabel("本界面为测试工具，不接管业务菜单。左侧为本轮实际标准输出，右侧为数据库执行前后只读查询。关闭窗口后自动清理测试库。"),BorderLayout.SOUTH);
+            panel.add(new JLabel("当前数据库保留 TC-02 复现结果供只读核验。关闭窗口或 15 分钟后自动清理测试库。"),BorderLayout.SOUTH);
             frame.setContentPane(panel);frame.setSize(1800,980);frame.setLocationRelativeTo(null);frame.setVisible(true);
+            timeout.start();
         });
         closed.await();
     }

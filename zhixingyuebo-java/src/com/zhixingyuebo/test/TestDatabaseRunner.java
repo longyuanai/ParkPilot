@@ -75,7 +75,11 @@ public final class TestDatabaseRunner {
                 summary.setProperty("evidence.schema", ownedSchema);
                 System.out.println("EVIDENCE_EXPORTED");
             }
-            if (evidence && passed) EvidenceWindow.showAndWait(TestCaseVerifier.RESULTS, ownedSchema);
+            if (evidence && passed) {
+                TestCaseVerifier.replayParkingExit(TestDatabaseRunner::resetFixture);
+                System.out.println("TC02_QUERY_READY=" + ownedSchema);
+                EvidenceWindow.showAndWait(TestCaseVerifier.RESULTS, ownedSchema);
+            }
         } finally {
             if (created) {
                 if (!ownedSchema.matches("zhixingyuebo_(test|evidence)_[a-f0-9]{12}") || ownedSchema.equals(originalSchema)) throw new IllegalStateException("拒绝清理非本次测试库");

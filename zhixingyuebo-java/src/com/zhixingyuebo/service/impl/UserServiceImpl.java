@@ -1,16 +1,27 @@
 package com.zhixingyuebo.service.impl;
 
+import com.zhixingyuebo.dao.AccountDao;
+import com.zhixingyuebo.dao.AccountFlowDao;
 import com.zhixingyuebo.dao.UserDao;
 import com.zhixingyuebo.dao.VehicleDao;
+import com.zhixingyuebo.dao.impl.AccountDaoImpl;
+import com.zhixingyuebo.dao.impl.AccountFlowDaoImpl;
 import com.zhixingyuebo.dao.impl.UserDaoImpl;
 import com.zhixingyuebo.dao.impl.VehicleDaoImpl;
-import com.zhixingyuebo.entity.User;
+import com.zhixingyuebo.entity.Account;
+import com.zhixingyuebo.entity.AccountFlow;
 import com.zhixingyuebo.entity.Admin;
+import com.zhixingyuebo.entity.OwnerDriver;
+import com.zhixingyuebo.entity.User;
 import com.zhixingyuebo.entity.Vehicle;
+import com.zhixingyuebo.exception.InsufficientBalanceException;
 import com.zhixingyuebo.exception.InvalidPlateNumberException;
 import com.zhixingyuebo.exception.ZhiXingYueBoException;
 import com.zhixingyuebo.service.UserService;
+import com.zhixingyuebo.util.DBUtil;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -23,6 +34,10 @@ public class UserServiceImpl implements UserService {
 
     private final UserDao userDao = new UserDaoImpl();
     private final VehicleDao vehicleDao = new VehicleDaoImpl();
+    private final AccountDao accountDao = new AccountDaoImpl();
+    private final AccountFlowDao accountFlowDao = new AccountFlowDaoImpl();
+    private static final BigDecimal DEFAULT_MONTHLY_CARD_PRICE = new BigDecimal("100.00");
+    private static final BigDecimal MAX_WALLET_AMOUNT = new BigDecimal("99999999.99");
 
     // 中国机动车号牌标准正则表达式（涵盖普通蓝/黄牌 7 位及新能源绿牌 8 位）
     private static final Pattern PLATE_PATTERN = Pattern.compile("^[京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵粤青藏川宁琼使领][A-HJ-NP-Z][A-HJ-NP-Z0-9]{4,6}[A-HJ-NP-Z0-9挂学警港澳]$");
@@ -88,6 +103,59 @@ public class UserServiceImpl implements UserService {
             return userDao.findMonthlyCardUntil(userId);
         } catch (SQLException e) {
             throw new ZhiXingYueBoException("查询月卡失败: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public BigDecimal getMonthlyCardPrice() throws ZhiXingYueBoException {
+        String setting = System.getProperty("zhixing.monthlyCard.price", System.getenv("ZXYB_MONTHLY_CARD_PRICE"));
+        if (setting == null || setting.trim().isEmpty()) return DEFAULT_MONTHLY_CARD_PRICE;
+        String invalidPrice = "月卡价格须为 0.01 至 99999999.99 元，最多两位小数，请检查 ZXYB_MONTHLY_CARD_PRICE。";
+        try {
+            BigDecimal price = new BigDecimal(setting.trim());
+            if (price.signum() <= 0 || price.compareTo(MAX_WALLET_AMOUNT) > 0) {
+                throw new ZhiXingYueBoException(invalidPrice);
+            }
+            return price.setScale(2, RoundingMode.UNNECESSARY);
+        } catch (IllegalArgumentException | ArithmeticException e) {
+            throw new ZhiXingYueBoException(invalidPrice);
+        }
+    }
+
+    @Override
+    public LocalDateTime buyOrRenewMonthlyCard(Integer ownerId) throws ZhiXingYueBoException {
+        if (ownerId == null) throw new ZhiXingYueBoException("仅车主可办理或续费月卡。");
+        BigDecimal price = getMonthlyCardPrice();
+        try {
+            DBUtil.beginTransaction();
+            // 与离场结算使用相同锁顺序，钱包与月卡有效期按同一笔业务核对。
+            Account account = accountDao.findByIdForUpdate(ownerId);
+            LocalDateTime currentUntil = userDao.findMonthlyCardUntilForUpdate(ownerId);
+            if (!(userDao.findById(ownerId) instanceof OwnerDriver)) {
+                throw new ZhiXingYueBoException("仅车主可办理或续费月卡。");
+            }
+            if (account == null) throw new ZhiXingYueBoException("请先在资产菜单初始化钱包并充值。");
+            BigDecimal beforeBalance = account.getBalance();
+            if (beforeBalance.compareTo(price) < 0) throw new InsufficientBalanceException(beforeBalance, price);
+
+            LocalDateTime now = LocalDateTime.now().withNano(0);
+            LocalDateTime start = currentUntil != null && currentUntil.isAfter(now) ? currentUntil : now;
+            LocalDateTime until = start.plusDays(MONTHLY_CARD_DAYS);
+            if (until.getYear() > 9999) throw new ZhiXingYueBoException("续费后的到期时间超出数据库范围。");
+            if (accountDao.deductBalance(ownerId, price) != 1 || userDao.updateMonthlyCardUntil(ownerId, until) != 1) {
+                throw new ZhiXingYueBoException("月卡办理失败，请重新查询钱包与有效期。");
+            }
+            AccountFlow flow = new AccountFlow(null, ownerId, beforeBalance, beforeBalance.subtract(price),
+                    price.negate(), AccountFlow.MONTHLY_CARD_PAYMENT, now);
+            if (accountFlowDao.insert(flow) != 1) throw new ZhiXingYueBoException("月卡流水写入失败。");
+            DBUtil.commitTransaction();
+            return until;
+        } catch (ZhiXingYueBoException e) {
+            DBUtil.rollbackTransaction();
+            throw e;
+        } catch (Exception e) {
+            DBUtil.rollbackTransaction();
+            throw new ZhiXingYueBoException("月卡办理失败，事务已回滚: " + e.getMessage(), e);
         }
     }
 

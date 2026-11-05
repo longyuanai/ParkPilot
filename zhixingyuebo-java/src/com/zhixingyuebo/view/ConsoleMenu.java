@@ -97,7 +97,7 @@ public class ConsoleMenu {
         while (true) {
             // 面向对象多态展示车主专属菜单
             owner.showMenu();
-            int choice = ScannerUtil.readInt(0, 7, "请输入菜单指令编号 [0-7]: ");
+            int choice = ScannerUtil.readInt(0, 8, "请输入菜单指令编号 [0-8]: ");
             if (choice == 0) {
                 System.out.println(FormatUtil.cyan("已退出车主工作台。"));
                 break;
@@ -126,12 +126,16 @@ public class ConsoleMenu {
                     case 7:
                         doChargingSimulator(owner); // 创新 A
                         break;
+                    case 8:
+                        doBuyMonthlyCard(owner);
+                        break;
                 }
             } catch (InsufficientBalanceException e) {
-                // TC-03: 重点捕获余额不足异常并红字告警
                 System.out.println(FormatUtil.red("\n════════════════════════════════════════════════════════════════"));
                 System.out.println(FormatUtil.bold(FormatUtil.red("【系统拦截】" + e.getMessage())));
-                System.out.println(FormatUtil.bold(FormatUtil.red("【道闸状态】钱包可用余额不足，拒绝抬杆放行！事务已全盘原子回滚！")));
+                if (choice == 5) {
+                    System.out.println(FormatUtil.bold(FormatUtil.red("【道闸状态】钱包可用余额不足，拒绝抬杆放行！事务已全盘原子回滚！")));
+                }
                 System.out.println(FormatUtil.red("════════════════════════════════════════════════════════════════"));
             } catch (ZhiXingYueBoException e) {
                 System.out.println(FormatUtil.red("【业务提示】: " + e.getMessage()));
@@ -140,6 +144,22 @@ public class ConsoleMenu {
             }
             ScannerUtil.pressEnterToContinue();
         }
+    }
+
+    private void doBuyMonthlyCard(OwnerDriver owner) throws ZhiXingYueBoException {
+        FormatUtil.printSection("停车月卡");
+        LocalDateTime currentUntil = userService.getMonthlyCardUntil(owner.getUserId());
+        System.out.println(currentUntil != null && currentUntil.isAfter(LocalDateTime.now())
+                ? "月卡生效至 " + DateUtil.format(currentUntil) : "暂无生效月卡");
+        BigDecimal price = userService.getMonthlyCardPrice();
+        System.out.println("本次月卡费用 " + FormatUtil.formatMoney(price)
+                + "，有效期增加 " + UserService.MONTHLY_CARD_DAYS + " 天。");
+        if (ScannerUtil.readInt(0, 1, "确认从钱包扣款？(1: 确认, 0: 返回): ") == 0) {
+            System.out.println("已取消月卡办理。");
+            return;
+        }
+        LocalDateTime until = userService.buyOrRenewMonthlyCard(owner.getUserId());
+        System.out.println(FormatUtil.green("月卡办理成功，有效至 " + DateUtil.format(until)));
     }
 
     private void showOwnerAssets(OwnerDriver owner) throws ZhiXingYueBoException {

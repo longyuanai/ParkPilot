@@ -15,5 +15,6 @@ public interface UserDao extends BaseDao<User, Integer> {
      */
     User findByPhone(String phone) throws SQLException;
     LocalDateTime findMonthlyCardUntil(Integer userId) throws SQLException;
+    LocalDateTime findMonthlyCardUntilForUpdate(Integer userId) throws SQLException;
     int updateMonthlyCardUntil(Integer userId, LocalDateTime until) throws SQLException;
 }

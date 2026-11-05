@@ -185,20 +185,19 @@ public class ParkingServiceImpl implements ParkingService {
             ParkingLot lot = parkingLotDao.findById(spot.getLotId());
             BigDecimal hourlyRate = lot != null ? lot.getHourlyRate() : new BigDecimal("4.00");
 
-            // 计算时间与阶梯停车费
-            LocalDateTime exitTime = now();
-            long minutes = DateUtil.calculateMinutes(record.getEntryTime(), exitTime);
-            LocalDateTime monthlyCardUntil = userDao.findMonthlyCardUntil(userId);
-            boolean monthlyFree = monthlyCardUntil != null && monthlyCardUntil.isAfter(exitTime);
-            BigDecimal totalFee = monthlyFree ? new BigDecimal("0.00")
-                    : DateUtil.calculateParkingFee(record.getEntryTime(), exitTime, hourlyRate);
-            int payStatus = monthlyFree ? 1 : 2;
-
-            // 检查车主钱包可用余额
             Account account = accountDao.findByIdForUpdate(vehicle.getUserId());
             if (account == null) {
                 throw new ZhiXingYueBoException("用户钱包未初始化");
             }
+            LocalDateTime monthlyCardUntil = userDao.findMonthlyCardUntilForUpdate(userId);
+
+            // 计算时间与阶梯停车费
+            LocalDateTime exitTime = now();
+            long minutes = DateUtil.calculateMinutes(record.getEntryTime(), exitTime);
+            boolean monthlyFree = monthlyCardUntil != null && monthlyCardUntil.isAfter(exitTime);
+            BigDecimal totalFee = monthlyFree ? new BigDecimal("0.00")
+                    : DateUtil.calculateParkingFee(record.getEntryTime(), exitTime, hourlyRate);
+            int payStatus = monthlyFree ? 1 : 2;
 
             // 若可用余额不足，立即抛出受检异常，阻断抬杆放行（绝不产生单边账）
             if (account.getBalance().compareTo(totalFee) < 0) {
