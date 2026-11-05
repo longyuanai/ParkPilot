@@ -1,0 +1,16 @@
+.backups/
+**/bin/
+**/build/
+**/reports/
+**/db.local.properties
+**/sources.txt
+*.zip
+智行悦泊期末大作业_成果提交归档包/
+delivery/
+**/__pycache__/
+zhixingyuebo-java/.idea/*
+!zhixingyuebo-java/.idea/modules.xml
+!zhixingyuebo-java/.idea/runConfigurations/
+zhixingyuebo-java/.idea/runConfigurations/*
+!zhixingyuebo-java/.idea/runConfigurations/MainApp.xml
+zhixingyuebo-java/out/
