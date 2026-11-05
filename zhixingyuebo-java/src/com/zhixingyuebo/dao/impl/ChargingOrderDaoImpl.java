@@ -74,6 +74,21 @@ public class ChargingOrderDaoImpl implements ChargingOrderDao {
     }
 
     @Override
+    public int advanceMeter(Long orderId, Integer userId, BigDecimal previousKwh, BigDecimal nextKwh) throws SQLException {
+        Connection conn = DBUtil.getConnection();
+        String sql = "UPDATE tb_charging_order SET kwh_amount=? WHERE order_id=? AND user_id=? AND order_status=0 AND kwh_amount=?";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setBigDecimal(1, nextKwh);
+            ps.setLong(2, orderId);
+            ps.setInt(3, userId);
+            ps.setBigDecimal(4, previousKwh);
+            return ps.executeUpdate();
+        } finally {
+            DBUtil.close(conn);
+        }
+    }
+
+    @Override
     public int finishChargingOrder(Long orderId, LocalDateTime endTime, BigDecimal kwhAmount, BigDecimal totalCost, int orderStatus) throws SQLException {
         String sql = "UPDATE tb_charging_order SET end_time = ?, kwh_amount = ?, total_cost = ?, order_status = ? WHERE order_id = ? AND order_status IN (0, 2)";
         Connection conn = DBUtil.getConnection();

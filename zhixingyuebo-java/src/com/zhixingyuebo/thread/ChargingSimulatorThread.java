@@ -15,6 +15,7 @@ public class ChargingSimulatorThread extends Thread {
 
     private final Long orderId;
     private final Integer userId;
+    private final BigDecimal initialKwh;
     private final BigDecimal targetKwh;
     private final BigDecimal powerKw;
     private final ChargingService chargingService;
@@ -25,10 +26,11 @@ public class ChargingSimulatorThread extends Thread {
     public ChargingSimulatorThread(ChargingOrder order, BigDecimal targetKwh, BigDecimal powerKw, ChargingService chargingService) {
         this.orderId = order.getOrderId();
         this.userId = order.getUserId();
+        this.initialKwh = order.getKwhAmount();
         if (targetKwh == null || targetKwh.compareTo(BigDecimal.ZERO) <= 0) {
             this.targetKwh = new BigDecimal("30.00").setScale(2, RoundingMode.HALF_UP);
         } else {
-            this.targetKwh = targetKwh.setScale(2, RoundingMode.HALF_UP);
+            this.targetKwh = targetKwh;
         }
         this.powerKw = powerKw != null ? powerKw.setScale(1, RoundingMode.HALF_UP) : new BigDecimal("7.0");
         this.chargingService = chargingService;
@@ -41,28 +43,30 @@ public class ChargingSimulatorThread extends Thread {
         System.out.println(FormatUtil.green("\n[IoT 智能充电网关] 充电枪头物理连接成功，高压回路闭合，功率: " + powerKw + " kW"));
         System.out.println(FormatUtil.cyan("[IoT 智能充电网关] 目标充入电量: " + targetKwh + " kWh，开始脉冲上报...\n"));
 
-        BigDecimal currentKwh = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        BigDecimal currentKwh = initialKwh;
         BigDecimal stepKwh = new BigDecimal("2.50"); // 每次递增 2.5 度电
         int barLength = 30; // 进度条总长度字符数
 
         try {
-            while (running && currentKwh.compareTo(targetKwh) < 0) {
+            BigDecimal target = ChargingService.exactKwh(targetKwh);
+            while (running && currentKwh.compareTo(target) < 0) {
                 Thread.sleep(2000);
-                ChargingOrder liveOrder = chargingService.getActiveOrderByUserId(userId);
-                if (liveOrder == null || !orderId.equals(liveOrder.getOrderId())) return;
-                if (liveOrder.getOrderStatus() == 2) {
-                    System.out.println("\n设备告警，中止采集，按已采集电量结算。");
-                    resultOrder = chargingService.finishCharging(orderId, userId, currentKwh);
+                if (!running) break;
+                BigDecimal nextKwh = currentKwh.add(stepKwh).min(target);
+                if (!chargingService.recordMeterProgress(orderId, userId, currentKwh, nextKwh)) {
+                    ChargingOrder liveOrder = chargingService.getActiveOrderByUserId(userId);
+                    if (liveOrder != null && orderId.equals(liveOrder.getOrderId()) && liveOrder.getOrderStatus() == 2) {
+                        System.out.println("\n设备告警，中止采集，按已保存电量结算。");
+                        resultOrder = chargingService.finishCharging(orderId, userId, null);
+                    } else {
+                        System.out.println("\n订单状态或计量已更新，请通过充电菜单查看。");
+                    }
                     return;
                 }
-
-                currentKwh = currentKwh.add(stepKwh);
-                if (currentKwh.compareTo(targetKwh) > 0) {
-                    currentKwh = targetKwh;
-                }
+                currentKwh = nextKwh;
 
                 // 计算百分比
-                double percent = currentKwh.divide(targetKwh, 4, RoundingMode.HALF_UP).doubleValue() * 100.0;
+                double percent = currentKwh.divide(target, 4, RoundingMode.HALF_UP).doubleValue() * 100.0;
                 int filledLength = (int) (barLength * (percent / 100.0));
                 if (filledLength > barLength) filledLength = barLength;
 
@@ -84,21 +88,21 @@ public class ChargingSimulatorThread extends Thread {
                         percent,
                         FormatUtil.GREEN,
                         currentKwh.toPlainString(),
-                        targetKwh.toPlainString(),
+                        target.toPlainString(),
                         powerKw.doubleValue());
                 System.out.print(line);
                 System.out.flush();
             }
 
-            System.out.println("\n" + FormatUtil.green(">>> [IoT 充电网关] 达到预设充满目标，BMS 主动切断充电回路！正在触发自动拔枪结算事务..."));
+            System.out.println(running ? "\n已达到目标电量，按订单计量自动结算。"
+                    : "\n已停止充电，按订单计量结算。");
 
-            // 自动调用核心事务二进行扣费归档
-            this.resultOrder = chargingService.finishCharging(orderId, userId, currentKwh);
+            this.resultOrder = chargingService.finishCharging(orderId, userId, null);
 
         } catch (InterruptedException e) {
             System.out.println("\n" + FormatUtil.yellow(">>> [IoT 充电网关] 用户手动中止拔枪，正在按当前实际充入电量结算..."));
             try {
-                this.resultOrder = chargingService.finishCharging(orderId, userId, currentKwh);
+                this.resultOrder = chargingService.finishCharging(orderId, userId, null);
             } catch (Exception ex) {
                 this.error = ex;
             }

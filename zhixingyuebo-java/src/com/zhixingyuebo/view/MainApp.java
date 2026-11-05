@@ -24,6 +24,7 @@ public class MainApp {
         } catch (Exception e) {
             System.err.println(FormatUtil.red("  [警告] 数据库初次握手异常: " + e.getMessage()));
             System.err.println("  请核对本地数据库配置和 README 中的初始化或升级步骤。");
+            System.err.println("  答辩演示可运行 demo.bat，启动独立样例库。");
             System.exit(1);
             return;
         }

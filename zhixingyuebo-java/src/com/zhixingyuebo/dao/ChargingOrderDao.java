@@ -26,6 +26,8 @@ public interface ChargingOrderDao extends BaseDao<ChargingOrder, Long> {
      */
     ChargingOrder findActiveOrderByUserId(Integer userId) throws SQLException;
 
+    int advanceMeter(Long orderId, Integer userId, BigDecimal previousKwh, BigDecimal nextKwh) throws SQLException;
+
     /**
      * 回填结束充电拔枪数据并完成工单归档
      */

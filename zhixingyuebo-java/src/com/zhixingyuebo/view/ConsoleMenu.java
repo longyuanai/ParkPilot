@@ -22,10 +22,18 @@ import java.util.List;
 public class ConsoleMenu {
 
     private final UserService userService = new UserServiceImpl();
-    private final ParkingService parkingService = new ParkingServiceImpl();
+    private final ParkingService parkingService;
     private final ChargingService chargingService = new ChargingServiceImpl();
     private final FaultService faultService = new FaultServiceImpl();
     private final AccountService accountService = new AccountServiceImpl();
+
+    public ConsoleMenu() {
+        this(new ParkingServiceImpl());
+    }
+
+    public ConsoleMenu(ParkingService parkingService) {
+        this.parkingService = parkingService;
+    }
 
     /**
      * 启动控制台主循环
@@ -81,6 +89,7 @@ public class ConsoleMenu {
      */
     private void showQuickGuide() {
         FormatUtil.printSection("任务书 6 组核心自测用例快捷对照表");
+        System.out.println("使用 demo.bat 可按固定时点复现以下样例。重新启动演示会加载新样例。");
         System.out.println("• TC-01: 车主登录 (13800000001) -> 欢迎张先生，名下川A88888，钱包500元，调出专属菜单");
         System.out.println("• TC-02: 离场阶梯算费与扣费 (川A88888停泊90分) -> 扣4.00元，钱包剩496元，释放车位并打印小票");
         System.out.println("• TC-03: 离场余额不足回滚测试 (李女士 13800000002，川A66666应收80元，余额50元) -> 红字拦截拒抬杆，事务零变更");
@@ -215,7 +224,14 @@ public class ConsoleMenu {
         int typeChoice = ScannerUtil.readInt(0, 2, "请选择车位类型过滤 [0-2]: ");
         Integer type = typeChoice == 0 ? null : typeChoice;
 
-        List<ParkingSpot> spots = parkingService.getAvailableSpots(type, null);
+        List<ParkingLot> lots = parkingService.getAllLots();
+        System.out.println("  0. 全部区域");
+        for (int i = 0; i < lots.size(); i++) {
+            System.out.println("  " + (i + 1) + ". " + lots.get(i).getLotName());
+        }
+        int area = ScannerUtil.readInt(0, lots.size(), "请选择车位区域 [0-" + lots.size() + "]: ");
+        Integer lotId = area == 0 ? null : lots.get(area - 1).getLotId();
+        List<ParkingSpot> spots = parkingService.getAvailableSpots(type, lotId);
         if (spots.isEmpty()) {
             System.out.println(FormatUtil.yellow("当前园区暂无符合条件的空闲车位！"));
             return;
@@ -234,6 +250,9 @@ public class ConsoleMenu {
         int opt = ScannerUtil.readInt(0, 1, "");
         if (opt == 1) {
             int spotId = ScannerUtil.readInt(1, 9999, "请输入要预约的车位ID: ");
+            if (spots.stream().noneMatch(spot -> spot.getSpotId().equals(spotId))) {
+                throw new ZhiXingYueBoException("请从本次筛选结果中选择车位。");
+            }
             ParkingSpot reserved = parkingService.reserveSpot(spotId, owner.getUserId());
             System.out.println(FormatUtil.green(">>> 车位 [" + reserved.getSpotNumber() + "] 已为您预约至 "
                     + DateUtil.format(reserved.getReservedUntil())));
@@ -322,10 +341,15 @@ public class ConsoleMenu {
             System.out.println(FormatUtil.yellow("未结工单 " + active.getOrderId() + " | " + active.getPlateNumber()
                     + " | " + active.getOrderStatusName()));
             System.out.println("启动时刻: " + DateUtil.format(active.getStartTime()));
+            boolean hasMeter = active.getKwhAmount().signum() > 0;
+            if (hasMeter) {
+                System.out.println("订单累计计量 " + active.getKwhAmount().toPlainString() + " kWh，本次按计量结算。");
+            }
             System.out.print("是否现在进行拔枪结算？(1: 立即拔枪结算, 0: 返回): ");
             int opt = ScannerUtil.readInt(0, 1, "");
             if (opt == 1) {
-                BigDecimal kwh = ScannerUtil.readPositiveBigDecimal("请输入实际充入电量（度/kWh，如 30.00）: ");
+                BigDecimal kwh = hasMeter ? null
+                        : ScannerUtil.readPositiveBigDecimal("请输入实际充入电量（度/kWh，如 30.00）: ");
                 Account beforeAcc = accountService.getAccount(owner.getUserId());
                 BigDecimal beforeBalance = beforeAcc.getBalance();
 
@@ -380,10 +404,8 @@ public class ConsoleMenu {
         System.out.println("服务工单号: " + active.getOrderId() + " | 服务车辆: " + active.getPlateNumber());
         System.out.println("设备资产: " + (pile != null ? pile.getPileCode() : "-") + " | 额定功率: " + (pile != null ? pile.getPowerKw() : "7.0") + " kW");
 
-        BigDecimal targetKwh = ScannerUtil.readPositiveBigDecimal("请输入本次模拟充电目标电量（度/kWh，如：20.00 或 30.00）: ");
-        if (targetKwh.compareTo(new BigDecimal("9999.99")) > 0) {
-            throw new ZhiXingYueBoException("目标电量不能超过 9999.99 kWh。");
-        }
+        BigDecimal targetKwh = ChargingService.exactKwh(
+                ScannerUtil.readPositiveBigDecimal("请输入本订单累计目标电量（度/kWh，如 30.00）: "));
 
         Account beforeAcc = accountService.getAccount(owner.getUserId());
         BigDecimal beforeBalance = beforeAcc.getBalance();

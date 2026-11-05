@@ -2,6 +2,7 @@ from pathlib import Path
 from datetime import datetime
 import argparse
 import csv
+import re
 from PIL import Image
 from docx import Document
 from docx.enum.section import WD_ORIENT, WD_SECTION_START
@@ -14,6 +15,7 @@ from docx.shared import Inches, Pt, RGBColor
 parser = argparse.ArgumentParser()
 parser.add_argument("project", type=Path)
 parser.add_argument("--date", default=datetime.now().strftime("%Y年%m月%d日"))
+parser.add_argument("--use-archived-tc02", action="store_true")
 args = parser.parse_args()
 project = args.project.resolve()
 evidence = project / "build" / "acceptance"
@@ -27,8 +29,13 @@ fingerprint = (evidence / "source.sha256").read_text(encoding="ascii").strip()
 assert len(fingerprint) == 64
 schema = summary["test.schema"]
 assert summary["evidence.schema"] == schema
-navicat_marker = evidence / "navicat.schema"
-navicat = navicat_marker.is_file() and navicat_marker.read_text(encoding="ascii").strip() == schema
+tc02_folder = evidence / ("tc02-reference" if args.use_archived_tc02 else "screenshots")
+navicat_marker = (tc02_folder if args.use_archived_tc02 else evidence) / "navicat.schema"
+navicat_schema = navicat_marker.read_text(encoding="ascii").strip() if navicat_marker.is_file() else ""
+navicat = navicat_schema == schema
+if args.use_archived_tc02:
+    assert re.fullmatch(r"zhixingyuebo_evidence_[a-f0-9]{12}", navicat_schema) and navicat_schema != schema
+    navicat = True
 
 doc = Document()
 section = doc.sections[0]
@@ -41,7 +48,7 @@ props = doc.core_properties
 props.title = "智行悦泊智慧停车与充电管理系统"
 props.subject = "课程设计与实现报告"
 props.author = "黄家威"
-props.identifier = fingerprint + " " + schema
+props.identifier = fingerprint + " " + schema + (" " + navicat_schema if args.use_archived_tc02 else "")
 props.keywords = "Java JDBC MySQL 智慧停车 课程设计"
 props.comments = ""
 props.language = "zh-CN"
@@ -200,7 +207,7 @@ body("系统用 DECIMAL 和 BigDecimal 保存和计算金额。唯一索引基�
 
 page_start("二  停车计费与状态一致性")
 heading("预约与离场", 2)
-body("预约保留 30 分钟，期间仅预约人可泊入。入场在车辆和车位行锁内执行，成功后清除预约。数据库唯一约束防止重复在场记录。")
+body("车位可按类型和区域组合筛选。预约保留 30 分钟，期间仅预约人可泊入。入场成功后清除预约，数据库唯一约束防止重复在场记录。")
 body("离场先核对车牌归属、在场记录和待结充电单。扣费、流水、车位释放和出场记录一起提交，余额不足或写入失败时回滚。")
 heading("计费口径", 2)
 table(("场景", "计算结果"), [
@@ -214,7 +221,7 @@ body("车主在菜单 8 查询并确认扣款。演示价为每 30 天 100.00 �
 body("办理与离场均先锁定钱包，再核对有效期。月卡扣款、延期和流水一起提交。管理员可登记有效期。")
 heading("充电和运维", 2)
 body("新能源车泊入对应车位后开桩，按实际电量结算。故障时原订单转为待结算，保留设备和车位占用。消警时按待结订单恢复设备状态。")
-body("后台线程每两秒更新电量，到达目标后自动结算。日报汇总停车、充电和月卡收入。")
+body("后台线程每两秒保存累计电量，扣款失败后按原计量补结算。日报分别汇总完成车次和实收金额，免费离场计入车次。")
 
 page_start("三  验收方法与结果")
 body(f"本轮自动化通过 {len(results)} 项。测试启动器使用随机 MySQL 测试库，为各用例加载样例数据。业务库执行前后指纹一致，测试库在完成后清理。")
@@ -226,11 +233,14 @@ table(("测试范围", "实际校验"), [
     ("F-01 至 F-08", "并发结算、钱包流水、故障回滚、月卡免停"),
     ("S-01 至 S-08", "业务库保护、所有权、预约过期、并发抢位、充电和故障联动"),
     ("M-01 至 M-05", "自助办卡与续期、拒绝与回滚、并发扣款、日报及价格配置"),
+    ("D-01 至 D-05", "计量补扣、并发与精度、免费车次、区域筛选、固定账单"),
 ], (2.06, 4.84))
 heading("复核入口", 2)
-body("新环境执行初始化 SQL 并填写本机数据库配置，再使用 run.bat 进入控制台。旧库先备份、停用旧程序并核查重复记录，之后执行升级 SQL。")
+body("答辩使用 demo.bat 创建独立样例库，固定停车计费时点。主菜单输入 0 后清理演示库。业务运行使用 run.bat，旧库按 README 备份和升级。")
 body("verify_tests.bat 运行完整回归。验收界面导出控制台输出和 JDBC 查询前后快照。压缩包附带结果清单与截图文件。")
-if navicat:
+if args.use_archived_tc02:
+    body("TC-02 的小票与 Navicat 对照取自上一轮同库原图。本轮重跑 TC-02，并在答辩入口复核 4.00 元扣费与 496.00 元余额。")
+elif navicat:
     body("TC-02 在本轮隔离库复现离场后，用 Navicat 只读查询停车记录与资金流水。报告并排展示控制台小票和查询结果。")
 
 cases = [
@@ -252,10 +262,13 @@ for index, (case, title, description) in enumerate(cases, 1):
     path = evidence / "screenshots" / f"{case}.png"
     body(description)
     if navicat and case == "TC-02":
-        navicat_comparison(path, evidence / "screenshots" / "TC-02-Navicat.png")
-        caption = body("图 02  TC-02  控制台小票与 Navicat 查询  |  同轮独立库", "Caption")
+        navicat_comparison(tc02_folder / "TC-02.png", tc02_folder / "TC-02-Navicat.png")
+        origin = "上一轮同库原图" if args.use_archived_tc02 else "本轮独立库"
+        caption = body(f"图 02  TC-02  控制台小票与 Navicat 查询  |  {origin}", "Caption")
         caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
         body("以离场时刻核对 tb_parking_record 与 tb_account_flow。查询返回一条对应的扣费流水，实收 4.00 元，余额变动为 −4.00 元。")
+        if args.use_archived_tc02:
+            body("图示数据源为 " + navicat_schema + "。本轮 TC-02 复验结果见包内验收清单。")
         continue
     with Image.open(path) as image:
         width, height = image.size

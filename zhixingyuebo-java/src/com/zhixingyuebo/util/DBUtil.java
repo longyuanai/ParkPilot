@@ -101,7 +101,7 @@ public final class DBUtil {
         if (!Boolean.getBoolean("zhixing.testMode")) throw new SQLException("拒绝在业务模式运行测试夹具");
         try (Connection connection = connect()) {
             String catalog = connection.getCatalog();
-            if (catalog == null || !catalog.matches("zhixingyuebo_(test|evidence)_[a-f0-9]{12}")) throw new SQLException("拒绝修改非独立测试库");
+            if (catalog == null || !catalog.matches("zhixingyuebo_(test|evidence|demo)_[a-f0-9]{12}")) throw new SQLException("拒绝修改非独立测试库");
         }
     }
     public static void close(Connection connection) {

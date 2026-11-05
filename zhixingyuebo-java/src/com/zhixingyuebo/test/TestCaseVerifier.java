@@ -30,8 +30,8 @@ public final class TestCaseVerifier {
         }
     }
     public static final List<Result> RESULTS = new ArrayList<>();
-    private static final ZoneId PARK_ZONE = ZoneId.of("Asia/Shanghai");
-    private static final LocalDateTime PARK_NOW = LocalDate.now(PARK_ZONE).atTime(10, 0);
+    private static final ZoneId PARK_ZONE = TestDatabaseRunner.FIXTURE_ZONE;
+    private static final LocalDateTime PARK_NOW = TestDatabaseRunner.FIXTURE_TIME;
     private static final ParkingServiceImpl parking = new ParkingServiceImpl(Clock.fixed(PARK_NOW.atZone(PARK_ZONE).toInstant(), PARK_ZONE));
     private static final ChargingServiceImpl charging = new ChargingServiceImpl();
     private static final AccountServiceImpl accounts = new AccountServiceImpl();
@@ -389,6 +389,72 @@ public final class TestCaseVerifier {
             require(until.equals(users.getMonthlyCardUntil(1)), "非法价格不改变有效期");
             audit(1);
         }, MONEY,CARD,FLOW);
+        run("D-01", "模拟计量在扣款失败后可按原值补结算", () -> {
+            ChargingOrder order = startParkedCharging(5, "川AD12345");
+            sql("UPDATE tb_account SET balance=1.00 WHERE account_id=5");
+            sql("UPDATE tb_account_flow SET after_balance=1.00, diff_amount=1.00 WHERE account_id=5");
+            String first = runConsole("1\n13800000005\n7\n5.00\n\n0\n0\n");
+            require(first.contains("100.0%") && first.contains("应付金额: ¥7.50"), "模拟达到 5 度后余额不足");
+            ChargingOrder pending = orders.findById(order.getOrderId());
+            require(pending.getOrderStatus() == 0, "保留未结订单");
+            money(pending.getKwhAmount(), "5.00");
+            String retry = runConsole("1\n13800000005\n6\n1\n\n0\n0\n");
+            require(retry.contains("订单累计计量 5.00 kWh") && retry.contains("应付金额: ¥7.50")
+                    && !retry.contains("请输入实际充入电量"), "真实菜单按原计量重新结算");
+            money(accounts.getAccount(5).getBalance(), "1.00");
+            accounts.recharge(5, bd("10"));
+            String paid = runConsole("1\n13800000005\n6\n1\n\n0\n0\n");
+            require(paid.contains("电子") && paid.contains("¥7.50"), "充值后按 5 度结清");
+            ChargingOrder closed = orders.findById(order.getOrderId());
+            require(closed.getOrderStatus() == 1 && piles.findById(1).getPileStatus() == 1, "归档并释放桩");
+            money(closed.getKwhAmount(), "5.00");
+            money(closed.getTotalCost(), "7.50");
+            money(accounts.getAccount(5).getBalance(), "3.50");
+            require(count("SELECT COUNT(*) FROM tb_account_flow WHERE account_id=5 AND biz_type='充电扣款'") == 1,
+                    "只有一次有效扣款");
+            audit(5);
+        }, MONEY,CHARGE,PILE,FLOW);
+        run("D-02", "计量并发更新与电量精度校验", () -> {
+            ChargingOrder order = startParkedCharging(5, "川AD12345");
+            long id = order.getOrderId();
+            expectBusiness(() -> charging.finishCharging(id, 5, bd("0.001")), "两位小数");
+            require(!charging.recordMeterProgress(id, 1, bd("0"), bd("2.50")), "其他用户无法写入计量");
+            AtomicInteger accepted = new AtomicInteger();
+            parallel(8, () -> {
+                if (charging.recordMeterProgress(id, 5, bd("0"), bd("2.50"))) accepted.incrementAndGet();
+            }, false);
+            require(accepted.get() == 1, "同一计量脉冲只保存一次");
+            ChargingOrder result = charging.finishCharging(id, 5, bd("0.01"));
+            money(result.getKwhAmount(), "2.50");
+            money(result.getTotalCost(), "3.75");
+            require(!charging.recordMeterProgress(id, 5, bd("2.50"), bd("5")), "结单后拒绝新增计量");
+            audit(5);
+        }, MONEY,CHARGE,FLOW);
+        run("D-03", "日报计入月卡与免费时段已完成车次", () -> {
+            users.setMonthlyCardUntil(4, 1, PARK_NOW.plusDays(3));
+            entryTime(1, 90);
+            entryTime(2, 30);
+            money(parking.processExit("川A88888", 1).getTotalFee(), "0.00");
+            money(parking.processExit("川A66666", 2).getTotalFee(), "0.00");
+            Path file = Paths.get(CsvExportUtil.exportDailyReport(output.resolve("free-exits").toString(), PARK_NOW.toLocalDate()));
+            String csv = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+            require(csv.contains("停车总收费,¥0.00 (已结2车次)") && csv.contains("月卡全免"),
+                    "两次免费离场计入车次并保留零元收入");
+        }, MONEY,PARK,FLOW);
+        run("D-04", "控制台组合车位类型与区域过滤", () -> {
+            String console = runConsole("1\n13800000001\n3\n1\n2\n0\n\n0\n0\n");
+            require(console.contains("B-0204") && !console.contains("A-0103") && !console.contains("B-0201"),
+                    "B 区普通车位筛选");
+        });
+        run("D-05", "隔离答辩入口复现两笔固定账单", () -> {
+            String script = "1\n13800000001\n5\n0\n川A88888\n\n0\n1\n13800000002\n5\n0\n川A66666\n\n0\n0\n";
+            String console = runJavaConsole(script, "100.00", "com.zhixingyuebo.test.TestDatabaseRunner", "--demo");
+            require(console.contains("DEMO_DATABASE=zhixingyuebo_demo_") && console.contains("DEMO_DATABASE_DELETED=true"),
+                    "使用独立演示库并完成清理");
+            require(console.contains("¥4.00") && console.contains("¥496.00"), "TC-02 四元离场");
+            require(console.contains("应付金额: ¥80.00") && console.contains("尚差: ¥30.00")
+                    && console.contains("拒绝抬杆放行"), "TC-03 八十元应收及余额不足拦截");
+        });
         boolean passed=RESULTS.stream().allMatch(r -> r.passed);
         StringBuilder tsv=new StringBuilder("id\tresult\ttitle\n");
         for(Result result:RESULTS) tsv.append(result.id).append('\t').append(result.passed?"PASS":"FAIL").append('\t').append(result.title).append('\n');
@@ -439,12 +505,18 @@ public final class TestCaseVerifier {
     }
 
     private static String runConsole(String input, String monthlyCardPrice) throws Exception {
+        return runJavaConsole(input, monthlyCardPrice, "com.zhixingyuebo.view.MainApp");
+    }
+
+    private static String runJavaConsole(String input, String monthlyCardPrice, String... appArguments) throws Exception {
         DBUtil.assertIsolatedTestDatabase();
         Path capture = Files.createTempFile(output, "console-", ".log");
         Path java = Paths.get(System.getProperty("java.home"), "bin", "java.exe");
         if (!Files.isRegularFile(java)) java = Paths.get(System.getProperty("java.home"), "bin", "java");
-        ProcessBuilder builder = new ProcessBuilder(java.toString(), "-Dfile.encoding=UTF-8", "-Duser.timezone=Asia/Shanghai",
-                "-cp", System.getProperty("java.class.path"), "com.zhixingyuebo.view.MainApp");
+        List<String> command = new ArrayList<>(Arrays.asList(java.toString(), "-Dfile.encoding=UTF-8",
+                "-Duser.timezone=Asia/Shanghai", "-cp", System.getProperty("java.class.path")));
+        command.addAll(Arrays.asList(appArguments));
+        ProcessBuilder builder = new ProcessBuilder(command);
         builder.environment().put("ZXYB_JDBC_URL", System.getProperty("zhixing.jdbc.url"));
         builder.environment().put("ZXYB_DB_CONFIG", System.getProperty("zhixing.db.config"));
         builder.environment().put("ZXYB_JDBC_USERNAME", System.getProperty("zhixing.jdbc.username"));

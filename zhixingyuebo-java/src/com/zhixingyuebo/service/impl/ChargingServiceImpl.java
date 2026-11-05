@@ -146,11 +146,23 @@ public class ChargingServiceImpl implements ChargingService {
     }
 
     @Override
-    public ChargingOrder finishCharging(Long orderId, Integer userId, BigDecimal kwhAmount) throws ZhiXingYueBoException {
-        if (kwhAmount == null || kwhAmount.signum() < 0 || kwhAmount.compareTo(new BigDecimal("9999.99")) > 0) {
-            throw new ZhiXingYueBoException("充入电量数值不合法！");
+    public boolean recordMeterProgress(Long orderId, Integer userId, BigDecimal previousKwh, BigDecimal nextKwh)
+            throws ZhiXingYueBoException {
+        BigDecimal previous = ChargingService.exactKwh(previousKwh);
+        BigDecimal next = ChargingService.exactKwh(nextKwh);
+        if (orderId == null || userId == null || next.compareTo(previous) <= 0) {
+            throw new ZhiXingYueBoException("充电计量须随有效工单递增。");
         }
-        kwhAmount = kwhAmount.setScale(2, RoundingMode.HALF_UP);
+        try {
+            return chargingOrderDao.advanceMeter(orderId, userId, previous, next) == 1;
+        } catch (SQLException e) {
+            throw new ZhiXingYueBoException("保存充电计量失败: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public ChargingOrder finishCharging(Long orderId, Integer userId, BigDecimal kwhAmount) throws ZhiXingYueBoException {
+        BigDecimal manualKwh = kwhAmount == null ? null : ChargingService.exactKwh(kwhAmount);
 
         try {
             ChargingOrder location = chargingOrderDao.findById(orderId);
@@ -172,10 +184,12 @@ public class ChargingServiceImpl implements ChargingService {
                 throw new ZhiXingYueBoException("该充电工单已结算归档，无需重复结算！");
             }
 
+            BigDecimal measuredKwh = order.getKwhAmount();
+            BigDecimal settledKwh = manualKwh == null || measuredKwh.signum() > 0 ? measuredKwh : manualKwh;
             BigDecimal pricePerKwh = pile.getPricePerKwh();
 
             // 计算实付总金额: kwhAmount * pricePerKwh
-            BigDecimal totalCost = kwhAmount.multiply(pricePerKwh).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal totalCost = settledKwh.multiply(pricePerKwh).setScale(2, RoundingMode.HALF_UP);
 
             // 检查车主钱包可用余额
             Account account = accountDao.findByIdForUpdate(order.getUserId());
@@ -204,7 +218,7 @@ public class ChargingServiceImpl implements ChargingService {
             accountFlowDao.insert(flow);
 
             // 3. 归档充电工单状态（状态置为 1: 已结算完成）
-            if (chargingOrderDao.finishChargingOrder(orderId, endTime, kwhAmount, totalCost, 1) != 1) throw new ZhiXingYueBoException("订单已结算，拒绝重复扣款");
+            if (chargingOrderDao.finishChargingOrder(orderId, endTime, settledKwh, totalCost, 1) != 1) throw new ZhiXingYueBoException("订单已结算，拒绝重复扣款");
 
             // 4. 将充电桩硬件状态恢复为 1: 空闲就绪
             if (chargingOrderDao.findActiveOrderByPileId(pile.getPileId()) == null) {
@@ -220,7 +234,7 @@ public class ChargingServiceImpl implements ChargingService {
 
             // 更新实体供打印小票
             order.setEndTime(endTime);
-            order.setKwhAmount(kwhAmount);
+            order.setKwhAmount(settledKwh);
             order.setTotalCost(totalCost);
             order.setOrderStatus(1);
 

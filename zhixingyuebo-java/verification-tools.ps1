@@ -5,7 +5,7 @@ function Get-ProjectFingerprint {
     foreach ($directory in @('src','sql','lib')) {
         $files += @(Get-ChildItem -LiteralPath (Join-Path $project $directory) -Recurse -File)
     }
-    foreach ($file in @('build.bat','build.ps1','run.bat','run.ps1','verify_tests.bat','verify_tests.ps1',
+    foreach ($file in @('build.bat','build.ps1','run.bat','run.ps1','demo.bat','verify_tests.bat','verify_tests.ps1',
             'java-tools.ps1','verification-tools.ps1','resources\db.properties',
             'zhixingyuebo-java.iml','.idea\modules.xml','.idea\runConfigurations\MainApp.xml')) {
         $files += Get-Item -LiteralPath (Join-Path $project $file)

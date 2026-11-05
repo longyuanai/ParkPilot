@@ -50,29 +50,28 @@ public class CsvExportUtil {
         List<ChargingOrder> chargingOrders = chargingOrderDao.findAll();
         List<AccountFlow> accountFlows = accountFlowDao.findAll();
         parkingRecords.removeIf(record -> record.getExitTime() == null || !record.getExitTime().toLocalDate().equals(today));
-        chargingOrders.removeIf(order -> order.getEndTime() == null || !order.getEndTime().toLocalDate().equals(today));
+        chargingOrders.removeIf(order -> order.getOrderStatus() != 1
+                || order.getEndTime() == null || !order.getEndTime().toLocalDate().equals(today));
         accountFlows.removeIf(flow -> flow.getCreatedAt() == null || !flow.getCreatedAt().toLocalDate().equals(today));
 
         // 汇总指标
         BigDecimal totalParkingIncome = BigDecimal.ZERO;
-        int totalParkingCount = 0;
+        int totalParkingCount = parkingRecords.size();
         for (ParkingRecord pr : parkingRecords) {
             if (pr.getTotalFee() != null && pr.getTotalFee().compareTo(BigDecimal.ZERO) > 0) {
                 totalParkingIncome = totalParkingIncome.add(pr.getTotalFee());
-                totalParkingCount++;
             }
         }
 
         BigDecimal totalChargingIncome = BigDecimal.ZERO;
         BigDecimal totalKwh = BigDecimal.ZERO;
-        int totalChargingCount = 0;
+        int totalChargingCount = chargingOrders.size();
         for (ChargingOrder co : chargingOrders) {
             if (co.getTotalCost() != null && co.getTotalCost().compareTo(BigDecimal.ZERO) > 0) {
                 totalChargingIncome = totalChargingIncome.add(co.getTotalCost());
-                if (co.getKwhAmount() != null) {
-                    totalKwh = totalKwh.add(co.getKwhAmount());
-                }
-                totalChargingCount++;
+            }
+            if (co.getKwhAmount() != null) {
+                totalKwh = totalKwh.add(co.getKwhAmount());
             }
         }
 

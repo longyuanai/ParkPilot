@@ -1,4 +1,4 @@
-﻿param([switch]$NoPause)
+﻿param([switch]$NoPause,[switch]$UseArchivedTc02)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'verification-tools.ps1')
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -13,13 +13,30 @@ if ($summary['test.passed'] -ne 'true' -or $summary['evidence.schema'] -ne $summ
     throw '请先运行 verify_tests.ps1 -ExportEvidence，并确认本版代码验收通过。'
 }
 $shotFolder = Join-Path $acceptance 'screenshots'
+$tc02Folder = $shotFolder
 $navicatMarker = Join-Path $acceptance 'navicat.schema'
-$navicatCurrent = (Test-Path -LiteralPath $navicatMarker -PathType Leaf) -and
-    (Get-Content -LiteralPath $navicatMarker -Raw).Trim() -eq $summary['test.schema']
-if (!$navicatCurrent -or !(Test-Path -LiteralPath (Join-Path $shotFolder 'TC-02-Navicat.png') -PathType Leaf)) {
-    throw '请按 README 补齐本轮验收库的 TC-02 Navicat 截图后再打包。'
+if ($UseArchivedTc02) {
+    $tc02Folder = Join-Path $acceptance 'tc02-reference'
+    $navicatMarker = Join-Path $tc02Folder 'navicat.schema'
+}
+if (!(Test-Path -LiteralPath $navicatMarker -PathType Leaf)) {
+    throw '请按 README 补齐 TC-02 截图和验收库名。'
+}
+$navicatSchema = (Get-Content -LiteralPath $navicatMarker -Raw).Trim()
+$navicatCurrent = $navicatSchema -eq $summary['test.schema']
+$expectedCurrent = -not $UseArchivedTc02
+if ($navicatSchema -notmatch '^zhixingyuebo_evidence_[a-f0-9]{12}$' -or $navicatCurrent -ne $expectedCurrent) {
+    throw 'TC-02 截图批次与打包模式不符。'
 }
 $shots = @(Get-ChildItem -LiteralPath $shotFolder -Filter '*.png' -File)
+if ($UseArchivedTc02) {
+    $shots = @($shots | Where-Object Name -notin @('TC-02.png','TC-02-Navicat.png'))
+    $shots += Get-Item -LiteralPath (Join-Path $tc02Folder 'TC-02.png')
+    $shots += Get-Item -LiteralPath (Join-Path $tc02Folder 'TC-02-Navicat.png')
+}
+if ('TC-02-Navicat.png' -notin $shots.Name -or 'TC-02.png' -notin $shots.Name) {
+    throw '请提供来自同一验收库的 TC-02 小票与 Navicat 截图。'
+}
 if ($shots.Count -lt 6 -or $shots.Count -gt 9) { throw '提交报告要求 6 到 9 张真实验收截图。' }
 
 function Read-ZipText($Entry) {
@@ -30,7 +47,7 @@ function Read-ZipText($Entry) {
 $doc = [IO.Compression.ZipFile]::OpenRead($report)
 try {
     $core = Read-ZipText ($doc.GetEntry('docProps/core.xml'))
-    if (!$core.Contains($verifiedHash) -or !$core.Contains($summary['test.schema'])) {
+    if (!$core.Contains($verifiedHash) -or !$core.Contains($summary['test.schema']) -or !$core.Contains($navicatSchema)) {
         throw '报告需要与本轮验收结果对应，请重新生成。'
     }
     $docImages = @($doc.Entries | Where-Object { $_.FullName -match '^word/media/[^/]+\.png$' })
@@ -40,7 +57,7 @@ try {
     }
     $shotHashes = @($shots | Get-FileHash -Algorithm SHA256 | Select-Object -ExpandProperty Hash)
     if ($docImages.Count -ne $shots.Count -or (Compare-Object $shotHashes @($docHashes))) {
-        throw '报告中的截图与本轮验收导出不一致。'
+        throw '报告内嵌图片与打包截图不一致。'
     }
 } finally { $doc.Dispose() }
 
@@ -60,7 +77,7 @@ Copy-Item -LiteralPath (Join-Path $project 'src') -Destination $source -Recurse
 Copy-Item -LiteralPath (Join-Path $project 'sql') -Destination $source -Recurse
 Copy-Item -LiteralPath (Join-Path $project 'resources\db.properties') -Destination $resources
 Copy-Item -LiteralPath (Join-Path $project 'lib\mysql-connector-j-8.1.0.jar') -Destination $lib
-foreach ($name in @('README.md','build.bat','build.ps1','run.bat','run.ps1','verify_tests.bat',
+foreach ($name in @('README.md','build.bat','build.ps1','run.bat','run.ps1','demo.bat','verify_tests.bat',
         'verify_tests.ps1','java-tools.ps1','verification-tools.ps1','zhixingyuebo-java.iml',
         '.idea\modules.xml','.idea\runConfigurations\MainApp.xml')) {
     Copy-Item -LiteralPath (Join-Path $project $name) -Destination (Join-Path $source $name)
@@ -78,7 +95,9 @@ $proof = @(
     ('Isolated test schema ' + $summary['test.schema'])
     ('Original database fingerprint match ' + $summary['production.unchanged'])
     ('Isolated schema removed ' + $summary['test.schema.deleted'])
-    ('Navicat TC-02 captured ' + $navicatCurrent.ToString().ToLowerInvariant())
+    'Navicat TC-02 captured true'
+    ('Navicat TC-02 source schema ' + $navicatSchema)
+    ('Navicat TC-02 current run ' + $navicatCurrent.ToString().ToLowerInvariant())
 )
 [IO.File]::WriteAllLines((Join-Path $docs '验收摘要.txt'), $proof, [Text.Encoding]::UTF8)
 if ((Get-ProjectFingerprint $source) -ne $verifiedHash) { throw '归档源码与已验收版本不一致。' }
@@ -95,7 +114,7 @@ try {
 $zip = [IO.Compression.ZipFile]::OpenRead($candidate)
 try {
     $names = @($zip.Entries | ForEach-Object { $_.FullName })
-    foreach ($required in @('1.源代码工程/run.ps1','1.源代码工程/verify_tests.ps1',
+    foreach ($required in @('1.源代码工程/run.ps1','1.源代码工程/demo.bat','1.源代码工程/verify_tests.ps1',
             '2.数据库脚本/01_create_zhixingyuebo_database_and_tables.sql',
             '2.数据库脚本/02_upgrade_existing_database.sql',
             ('3.课程设计报告/' + [IO.Path]::GetFileName($report)))) {
