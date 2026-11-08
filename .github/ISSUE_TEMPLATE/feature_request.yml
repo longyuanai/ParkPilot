@@ -1,0 +1,20 @@
+name: 💡 功能与架构建议 (Feature Request)
+description: 为 ParkPilot 提出新的计费策略、硬件协议适配或性能优化方案
+title: "【Feature】[建议概述]"
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: feature_desc
+    attributes:
+      label: 功能建议需求描述 (Feature Description)
+      placeholder: "请描述希望增加的业务功能或架构优化点（例如：新增某品牌车牌相机 SDK 对接协议、支持微信扫码出场等）。"
+    validations:
+      required: true
+
+  - type: textarea
+    id: value_prop
+    attributes:
+      label: 业务价值与使用场景 (Business Value & Use Case)
+      placeholder: "该功能对智慧园区停车运营或充电场站管理有哪些具体帮助？"
+    validations:
+      required: true

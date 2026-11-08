@@ -1,0 +1,47 @@
+name: 💼 商业授权与企业采购咨询 (Commercial Inquiry)
+description: 咨询 ParkPilot 企业源码买断商业授权、单场站运营许可或硬件定制开发合作
+title: "【商业授权申请】[贵司/团队名称] - [意向授权类型]"
+labels: ["commercial", "inquiry"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢您对 **ParkPilot (智泊领航)** 商业授权的关注！
+        本项目遵循 `PolyForm Noncommercial 1.0.0` 协议，企业生产运营或商业衍生二次开发须获得原作者授权。
+        如需保密询价，可直接发送邮件至：**1507205727@qq.com**。
+
+  - type: input
+    id: company_name
+    attributes:
+      label: 企业 / 团队名称 (Company or Team Name)
+      placeholder: "例如：某某智能科技有限公司 / 某某智慧停车运营中心"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: license_type
+    attributes:
+      label: 意向商业授权类型 (Interested License Tier)
+      options:
+        - "企业源码买断商业授权 (¥5,999 - 100% 完整源码，允许闭源商业二次开发)"
+        - "单车场节点商业运营授权 (¥1,500 / 场站 / 年)"
+        - "硬件对接与深度定制开发 (海康/大华道闸相机 SDK、充电桩国标协议等)"
+        - "其他定制化技术咨询"
+    validations:
+      required: true
+
+  - type: textarea
+    id: project_desc
+    attributes:
+      label: 业务落地场景与车场规模 (Project Background & Scale)
+      placeholder: "请简要描述您的业务场景（如：商场停车场、园区新能源充电场站、高校实训基地等）以及预计接入车位/充电桩规模。"
+    validations:
+      required: true
+
+  - type: input
+    id: contact_info
+    attributes:
+      label: 商务联系方式 (Contact Information)
+      placeholder: "请提供您的企业邮箱、微信号或商务手机号（便于作者黄家威联系您签署授权合同）"
+    validations:
+      required: true

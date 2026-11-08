@@ -3,8 +3,10 @@
 
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)](LICENSE)
 [![Commercial License](https://img.shields.io/badge/Commercial%20License-Available%20%26%20Required-brightgreen.svg)](COMMERCIAL.md)
+[![CI Pipeline](https://github.com/longyuanai/ParkPilot/actions/workflows/ci.yml/badge.svg)](https://github.com/longyuanai/ParkPilot/actions/workflows/ci.yml)
 [![Java: 8 / 17](https://img.shields.io/badge/Java-8%20%7C%2017-orange.svg)](https://www.oracle.com/java/)
 [![Tests: 43/43 Passed](https://img.shields.io/badge/Tests-43%2F43%20Passed%20(100%25)-success.svg)](zhixingyuebo-java/verify_tests.bat)
+[![Docker Ready](https://img.shields.io/badge/Docker-One--Click%20Compose-2496ED.svg?logo=docker&logoColor=white)](docker-compose.yml)
 [![Architecture: Zero Framework](https://img.shields.io/badge/Architecture-Pure%20Native%20Java%20SE-purple.svg)](README.md)
 [![Author: Jiawei Huang](https://img.shields.io/badge/Author-Jiawei%20Huang%20(%E9%BB%84%E5%AE%B6%E5%A8%81)-informational.svg)](COMMERCIAL.md)
 
@@ -111,14 +113,36 @@ jdbc.username=your_username
 jdbc.password=your_password
 ```
 
-运行启动脚本：
+### 3. 配置与启动方式
+
+#### 方式 A：Docker Compose 一键容器化运行 (推荐生产/边缘快速验证)
+项目根目录自带生产级 Docker 与 Compose 配置：
 ```bash
-# Windows 控制台一键编译并启动主程序
+# 一键拉起 MySQL 8.0 容器并自动初始化 11 张物理表与运行环境
+docker compose up -d
+
+# 接入控制台交互
+docker attach parkpilot-core
+```
+
+#### 方式 B：本地 Windows 原生启动
+```bash
 cd zhixingyuebo-java
+
+# Windows 控制台一键编译并启动主程序
 run.bat
 
-# 一键执行 43 项全量自动化测试验证
+# 一键执行 43 项全量自动化测试验证 (自毁沙箱库)
 verify_tests.bat
+```
+
+#### 方式 C：Linux / macOS / 树莓派 POSIX 终端启动
+```bash
+cd zhixingyuebo-java
+
+# 授予执行权限并编译启动
+chmod +x build.sh run.sh
+./run.sh
 ```
 
 ### 4. 预置演示账号矩阵
@@ -144,6 +168,9 @@ ParkPilot (智泊领航) 采用**「源码可用 + 双重商业许可」**模式
 2. **单场站运营部署授权**（¥1,500 / 场站 / 年）：提供针对单一停车场的生产运行授权及技术维护；
 3. **企业定制与硬件对接**（按需评估）：对接海康/大华车牌识别一体机、充电桩国标通信协议（GB/T 27930 或 OCPP）、微信/支付宝无感支付等。
 
+> 📄 **企业法务与采购支持**：  
+> 我们为您准备了符合法律规范的标准协议模板：[《ParkPilot 企业级商业授权协议(模板)》](docs/ParkPilot_企业级商业授权协议(模板).md)，企业法务可直接审阅与提交流程。  
+> 
 > 📮 **商务咨询与商业授权联系方式**：  
 > - **著作权所有人**：黄家威 (Jiawei Huang)  
 > - **商业授权邮箱**：**[1507205727@qq.com](mailto:1507205727@qq.com)**  

@@ -1,0 +1,36 @@
+name: 🐛 缺陷报告 (Bug Report)
+description: 提交 ParkPilot 系统运行异常、SQL 故障或测试未通过的问题
+title: "【Bug】[问题简述]"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交缺陷前，请确认已在干净的沙箱环境中运行过 `verify_tests.bat` 并核实 MySQL 8.0 数据库连接状态。
+
+  - type: textarea
+    id: bug_desc
+    attributes:
+      label: 异常现象描述 (Description)
+      placeholder: "请清晰描述您遇到的问题及报错堆栈信息。"
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction_steps
+    attributes:
+      label: 复现步骤 (Steps to Reproduce)
+      placeholder: |
+        1. 执行 run.bat 启动系统
+        2. 输入测试账号 13800000001
+        3. 选择菜单项 ...
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: 运行环境信息 (Environment)
+      placeholder: "操作系统 (Windows 11 / Linux) / JDK 版本 (17) / MySQL 版本 (8.0)"
+    validations:
+      required: true

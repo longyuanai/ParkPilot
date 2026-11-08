@@ -1,0 +1,70 @@
+# ====================================================================
+# ParkPilot (智泊领航) - Docker Compose One-Click Deployment
+# Architecture: MySQL 8.0 Database + ParkPilot Core Edge Engine
+# ====================================================================
+
+version: '3.8'
+
+services:
+  # ------------------------------------------------------------------
+  # 1. MySQL 8.0 核心业务数据库服务
+  # ------------------------------------------------------------------
+  parkpilot-db:
+    image: mysql:8.0.35
+    container_name: parkpilot-mysql
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+      - --default-time-zone=+08:00
+      - --explicit_defaults_for_timestamp=1
+    environment:
+      MYSQL_ROOT_PASSWORD: parkpilot_secret_root
+      MYSQL_DATABASE: zhixingyuebo_db
+      MYSQL_USER: parkpilot_user
+      MYSQL_PASSWORD: parkpilot_password
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 容器启动时自动初始化 11 张物理核心表与模拟账号数据
+      - ./zhixingyuebo-java/sql/01_create_zhixingyuebo_database_and_tables.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    ports:
+      - "3306:3306"
+    networks:
+      - parkpilot-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pparkpilot_secret_root"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ------------------------------------------------------------------
+  # 2. ParkPilot (智泊领航) 纯原生核心引擎
+  # ------------------------------------------------------------------
+  parkpilot-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: parkpilot-core
+    restart: unless-stopped
+    depends_on:
+      parkpilot-db:
+        condition: service_healthy
+    stdin_open: true
+    tty: true
+    environment:
+      TZ: Asia/Shanghai
+      ZXYB_JDBC_URL: "jdbc:mysql://parkpilot-db:3306/zhixingyuebo_db?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8"
+      ZXYB_JDBC_USERNAME: "parkpilot_user"
+      ZXYB_JDBC_PASSWORD: "parkpilot_password"
+      ZXYB_MONTHLY_CARD_PRICE: "100.00"
+    networks:
+      - parkpilot-net
+
+volumes:
+  mysql-data:
+    driver: local
+
+networks:
+  parkpilot-net:
+    driver: bridge
