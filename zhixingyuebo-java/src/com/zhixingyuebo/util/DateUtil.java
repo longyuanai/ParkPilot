@@ -1,3 +1,13 @@
+/*
+ * Copyright (c) 2026 Jiawei Huang (黄家威). All Rights Reserved.
+ *
+ * Project: ParkPilot (智泊领航) - Smart Parking & EV Charging Core Engine
+ * Licensed under the PolyForm Noncommercial License 1.0.0 (the "License").
+ * You may not use this file except in compliance with the License.
+ *
+ * Commercial Use strictly requires a separate commercial license from the author.
+ * For commercial licensing, please refer to COMMERCIAL.md or contact: 1507205727@qq.com
+ */
 package com.zhixingyuebo.util;
 
 import java.math.BigDecimal;
@@ -46,29 +56,9 @@ public class DateUtil {
         return Math.max(minutes, 0);
     }
 
-    /** 免收前半小时，之后每个园区自然日向上取整到小时，单日最高 50 元。 */
+    /** 免收前半小时，之后每个园区自然日向上取整到小时，单日最高 50 元（委托计费策略引擎）。 */
     public static BigDecimal calculateParkingFee(LocalDateTime entry, LocalDateTime exit, BigDecimal hourlyRate) {
-        LocalDateTime billableStart = entry.plusMinutes(30);
-        if (!exit.isAfter(billableStart)) return new BigDecimal("0.00");
-        if (hourlyRate == null || hourlyRate.compareTo(BigDecimal.ZERO) <= 0) {
-            hourlyRate = new BigDecimal("4.00");
-        }
-        LocalDateTime nextMidnight = billableStart.toLocalDate().plusDays(1).atStartOfDay();
-        BigDecimal total = dailyFee(billableStart, exit.isBefore(nextMidnight) ? exit : nextMidnight, hourlyRate);
-        if (exit.isAfter(nextMidnight)) {
-            LocalDateTime lastMidnight = exit.toLocalDate().atStartOfDay();
-            long fullDays = ChronoUnit.DAYS.between(nextMidnight.toLocalDate(), lastMidnight.toLocalDate());
-            BigDecimal fullDayFee = hourlyRate.multiply(BigDecimal.valueOf(24)).min(new BigDecimal("50.00"));
-            total = total.add(fullDayFee.multiply(BigDecimal.valueOf(fullDays)))
-                    .add(dailyFee(lastMidnight, exit, hourlyRate));
-        }
-        return total.setScale(2, RoundingMode.HALF_UP);
-    }
-
-    private static BigDecimal dailyFee(LocalDateTime start, LocalDateTime end, BigDecimal hourlyRate) {
-        Duration duration = Duration.between(start, end);
-        long hours = duration.toHours();
-        if (!duration.minusHours(hours).isZero()) hours++;
-        return hourlyRate.multiply(BigDecimal.valueOf(hours)).min(new BigDecimal("50.00"));
+        return com.zhixingyuebo.strategy.FeeStrategyFactory.getParkingFeeStrategy()
+                .calculateFee(entry, exit, hourlyRate, false);
     }
 }

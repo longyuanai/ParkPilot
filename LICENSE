@@ -1,0 +1,48 @@
+PolyForm Noncommercial License 1.0.0
+
+<https://polyformproject.org/licenses/noncommercial/1.0.0>
+
+Copyright (c) 2026 Jiawei Huang (黄家威) <1507205727@qq.com>
+
+Permission is hereby granted to any person obtaining a copy of this software
+and associated documentation files (the "Software"), to deal in the Software
+subject to the following conditions and restrictions:
+
+1. Noncommercial Purpose Only
+You may use, copy, modify, and distribute the Software solely for Noncommercial
+Purposes. A "Commercial Purpose" is strictly prohibited under this License and
+includes, without limitation, any use of the Software:
+(a) In connection with any business, corporate enterprise, government agency,
+    or commercial entity, including internal production or operational use;
+(b) In exchange for payment, fee, subscription, or any direct/indirect financial
+    or monetary compensation;
+(c) To provide any hosted service, Software-as-a-Service (SaaS), platform, or
+    commercial deployment to any third party;
+(d) Integrated into, bundled with, or utilized in the development, operation,
+    or maintenance of any commercial product, hardware system, or service.
+
+2. Permitted Uses
+Under this License, you may freely use the Software for:
+(a) Personal learning, technical study, and noncommercial experimentation;
+(b) Academic research, educational training, and classroom coursework evaluation;
+(c) Code inspection, security auditing, and open-source contributions.
+
+3. Commercial Licensing Required
+Any Commercial Purpose requires a separate, explicit, written commercial license
+granted by the copyright holder. To purchase or inquire about commercial licensing,
+please review `COMMERCIAL.md` or contact the copyright holder directly:
+- Copyright Holder: Jiawei Huang (黄家威)
+- Email: 1507205727@qq.com
+
+4. Retention of Notices
+You must retain all copyright, trademark, and license notices in all copies or
+substantial portions of the Software.
+
+5. Disclaimer of Warranty
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.

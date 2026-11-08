@@ -185,6 +185,22 @@ CREATE TABLE `tb_account_flow` (
     CONSTRAINT `fk_flow_account` FOREIGN KEY (`account_id`) REFERENCES `tb_account` (`account_id`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='资金变动只读审计流水表';
 
+-- --------------------------------------------------------------------
+-- 表 11：车主停车月卡办理与续费历史台账表（tb_monthly_card，完善任务书 1:n 办理月卡设计）
+-- --------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tb_monthly_card` (
+    `card_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '月卡流水主键',
+    `user_id` INT UNSIGNED NOT NULL COMMENT '车主用户ID，关联 tb_user.user_id',
+    `card_type` VARCHAR(20) NOT NULL DEFAULT 'STANDARD' COMMENT '月卡卡种（STANDARD普通全通卡, VIP专享卡）',
+    `price` DECIMAL(10,2) NOT NULL DEFAULT 100.00 COMMENT '实付办卡/续费金额',
+    `start_time` DATETIME NOT NULL COMMENT '本期生效起始时刻',
+    `end_time` DATETIME NOT NULL COMMENT '本期有效截止时刻',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '办理/续费交易时刻',
+    PRIMARY KEY (`card_id`),
+    KEY `idx_card_user` (`user_id`),
+    CONSTRAINT `fk_card_user` FOREIGN KEY (`user_id`) REFERENCES `tb_user` (`user_id`) ON DELETE RESTRICT ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='车主停车月卡办理与续费历史台账表';
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ====================================================================

@@ -1,14 +1,28 @@
+/*
+ * Copyright (c) 2026 Jiawei Huang (黄家威). All Rights Reserved.
+ *
+ * Project: ParkPilot (智泊领航) - Smart Parking & EV Charging Core Engine
+ * Licensed under the PolyForm Noncommercial License 1.0.0 (the "License").
+ * You may not use this file except in compliance with the License.
+ *
+ * Commercial Use strictly requires a separate commercial license from the author.
+ * For commercial licensing, please refer to COMMERCIAL.md or contact: 1507205727@qq.com
+ */
 package com.zhixingyuebo.util;
+
+import com.zhixingyuebo.pool.ConnectionPool;
+import com.zhixingyuebo.pool.SimpleConnectionPool;
 
 import java.io.*;
 import java.nio.file.*;
 import java.sql.*;
 import java.util.Properties;
 
-/** JDBC 连接和当前线程事务。真实凭据只从外部本地配置或环境读取。 */
+/** JDBC 连接和当前线程事务。真实凭据只从外部本地配置或环境读取。集成轻量级原生连接池。 */
 public final class DBUtil {
     private static final Properties CONFIG = loadConfiguration();
     private static final ThreadLocal<Connection> CONNECTION_HOLDER = new ThreadLocal<>();
+    private static volatile SimpleConnectionPool pool;
     private DBUtil() { }
     private static Properties loadConfiguration() {
         Properties config = new Properties();
@@ -33,20 +47,67 @@ public final class DBUtil {
         if (value == null) value = System.getenv(env);
         if (value != null) config.setProperty(key, value);
     }
+    private static String getEffectiveUrl() {
+        String url = System.getProperty("zhixing.jdbc.url");
+        if (url == null) url = System.getenv("ZXYB_JDBC_URL");
+        if (url == null) url = CONFIG.getProperty("jdbc.url");
+        return url;
+    }
+    private static String getEffectiveUsername() {
+        String user = System.getProperty("zhixing.jdbc.username");
+        if (user == null) user = System.getenv("ZXYB_JDBC_USERNAME");
+        if (user == null) user = CONFIG.getProperty("jdbc.username", "");
+        return user;
+    }
+    private static String getEffectivePassword() {
+        String pwd = System.getProperty("zhixing.jdbc.password");
+        if (pwd == null) pwd = System.getenv("ZXYB_JDBC_PASSWORD");
+        if (pwd == null) pwd = CONFIG.getProperty("jdbc.password", "");
+        return pwd;
+    }
     private static Connection connect() throws SQLException {
-        String url = CONFIG.getProperty("jdbc.url");
-        String user = CONFIG.getProperty("jdbc.username", "");
+        String url = getEffectiveUrl();
+        String user = getEffectiveUsername();
         if (url == null || user.trim().isEmpty()) throw new SQLException("请设置 db.local.properties 或 ZXYB_JDBC_* 环境变量");
         Properties options = new Properties();
         options.setProperty("user", user);
-        options.setProperty("password", CONFIG.getProperty("jdbc.password", ""));
+        options.setProperty("password", getEffectivePassword());
         options.setProperty("connectTimeout", "5000");
         options.setProperty("socketTimeout", "30000");
         return DriverManager.getConnection(url, options);
     }
+    public static ConnectionPool getPool() throws SQLException {
+        String currentUrl = getEffectiveUrl();
+        if (pool == null || !pool.getUrl().equals(currentUrl)) {
+            synchronized (DBUtil.class) {
+                if (pool == null || !pool.getUrl().equals(currentUrl)) {
+                    if (pool != null) {
+                        pool.close();
+                    }
+                    String user = getEffectiveUsername();
+                    if (currentUrl == null || user.trim().isEmpty()) {
+                        throw new SQLException("请设置 db.local.properties 或 ZXYB_JDBC_* 环境变量");
+                    }
+                    Properties options = new Properties();
+                    options.setProperty("user", user);
+                    options.setProperty("password", getEffectivePassword());
+                    options.setProperty("connectTimeout", "5000");
+                    options.setProperty("socketTimeout", "30000");
+                    pool = new SimpleConnectionPool(currentUrl, options, 2, 32, 8000);
+                }
+            }
+        }
+        return pool;
+    }
     public static Connection getConnection() throws SQLException {
         Connection connection = CONNECTION_HOLDER.get();
-        return connection != null && !connection.isClosed() ? connection : connect();
+        if (connection != null && !connection.isClosed()) {
+            return connection;
+        }
+        if ("false".equalsIgnoreCase(System.getProperty("zhixing.pool.enabled"))) {
+            return connect();
+        }
+        return getPool().getConnection();
     }
     public static void verifyApplicationSchema(Connection connection) throws SQLException {
         String[][] required = {

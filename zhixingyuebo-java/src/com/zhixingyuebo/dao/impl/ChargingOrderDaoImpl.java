@@ -1,3 +1,13 @@
+/*
+ * Copyright (c) 2026 Jiawei Huang (黄家威). All Rights Reserved.
+ *
+ * Project: ParkPilot (智泊领航) - Smart Parking & EV Charging Core Engine
+ * Licensed under the PolyForm Noncommercial License 1.0.0 (the "License").
+ * You may not use this file except in compliance with the License.
+ *
+ * Commercial Use strictly requires a separate commercial license from the author.
+ * For commercial licensing, please refer to COMMERCIAL.md or contact: 1507205727@qq.com
+ */
 package com.zhixingyuebo.dao.impl;
 
 import com.zhixingyuebo.dao.ChargingOrderDao;
@@ -246,6 +256,27 @@ public class ChargingOrderDaoImpl implements ChargingOrderDao {
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, id);
             return ps.executeUpdate();
+        } finally {
+            if (!DBUtil.isTransactionActive()) {
+                DBUtil.close(conn);
+            }
+        }
+    }
+
+    @Override
+    public ChargingOrder findLatestFinishedOrderByPlate(String plateNumber) throws SQLException {
+        if (plateNumber == null) return null;
+        String sql = "SELECT order_id, pile_id, user_id, plate_number, start_time, end_time, kwh_amount, total_cost, order_status " +
+                "FROM tb_charging_order WHERE plate_number = ? AND order_status = 1 ORDER BY order_id DESC LIMIT 1";
+        Connection conn = DBUtil.getConnection();
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, plateNumber.trim().toUpperCase());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return mapRowToOrder(rs);
+                }
+                return null;
+            }
         } finally {
             if (!DBUtil.isTransactionActive()) {
                 DBUtil.close(conn);

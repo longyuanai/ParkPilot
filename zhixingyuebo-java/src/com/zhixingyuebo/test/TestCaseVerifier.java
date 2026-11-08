@@ -1,3 +1,13 @@
+/*
+ * Copyright (c) 2026 Jiawei Huang (黄家威). All Rights Reserved.
+ *
+ * Project: ParkPilot (智泊领航) - Smart Parking & EV Charging Core Engine
+ * Licensed under the PolyForm Noncommercial License 1.0.0 (the "License").
+ * You may not use this file except in compliance with the License.
+ *
+ * Commercial Use strictly requires a separate commercial license from the author.
+ * For commercial licensing, please refer to COMMERCIAL.md or contact: 1507205727@qq.com
+ */
 package com.zhixingyuebo.test;
 
 import com.zhixingyuebo.dao.*;
@@ -6,6 +16,8 @@ import com.zhixingyuebo.entity.*;
 import com.zhixingyuebo.enums.*;
 import com.zhixingyuebo.exception.*;
 import com.zhixingyuebo.service.impl.*;
+import com.zhixingyuebo.pool.ConnectionPool;
+import com.zhixingyuebo.strategy.*;
 import com.zhixingyuebo.thread.ChargingSimulatorThread;
 import com.zhixingyuebo.util.*;
 import com.zhixingyuebo.view.TicketPrinter;
@@ -454,6 +466,150 @@ public final class TestCaseVerifier {
             require(console.contains("¥4.00") && console.contains("¥496.00"), "TC-02 四元离场");
             require(console.contains("应付金额: ¥80.00") && console.contains("尚差: ¥30.00")
                     && console.contains("拒绝抬杆放行"), "TC-03 八十元应收及余额不足拦截");
+        });
+        run("O-01", "计费策略模式动态切换与扩展机制", () -> {
+            ParkingFeeStrategy originalParking = FeeStrategyFactory.getParkingFeeStrategy();
+            ChargingFeeStrategy originalCharging = FeeStrategyFactory.getChargingFeeStrategy();
+            try {
+                require(originalParking instanceof StandardParkingFeeStrategy, "默认停车策略为阶梯计费");
+                require(originalCharging instanceof FlatChargingFeeStrategy, "默认充电策略为基准费率计费");
+
+                ParkingFeeStrategy halfPriceStrategy = new ParkingFeeStrategy() {
+                    @Override
+                    public BigDecimal calculateFee(LocalDateTime entry, LocalDateTime exit, BigDecimal hourlyRate, boolean hasValidMonthlyCard) {
+                        BigDecimal base = new StandardParkingFeeStrategy().calculateFee(entry, exit, hourlyRate, hasValidMonthlyCard);
+                        return base.multiply(new BigDecimal("0.50")).setScale(2, java.math.RoundingMode.HALF_UP);
+                    }
+                    @Override
+                    public String getStrategyName() { return "半价惠民策略"; }
+                };
+                FeeStrategyFactory.setParkingFeeStrategy(halfPriceStrategy);
+                require("半价惠民策略".equals(FeeStrategyFactory.getParkingFeeStrategy().getStrategyName()), "策略切换成功");
+                LocalDateTime t0 = LocalDateTime.of(2026, 11, 7, 10, 0, 0);
+                money(FeeStrategyFactory.getParkingFeeStrategy().calculateFee(t0, t0.plusMinutes(90), new BigDecimal("4.00"), false), "2.00");
+
+                FeeStrategyFactory.setChargingFeeStrategy(new PeakValleyChargingFeeStrategy());
+                require(FeeStrategyFactory.getChargingFeeStrategy() instanceof PeakValleyChargingFeeStrategy, "切换峰谷策略");
+            } finally {
+                FeeStrategyFactory.setParkingFeeStrategy(originalParking);
+                FeeStrategyFactory.setChargingFeeStrategy(originalCharging);
+            }
+        });
+        run("O-02", "分时峰谷充电计费核算", () -> {
+            PeakValleyChargingFeeStrategy strategy = new PeakValleyChargingFeeStrategy();
+            BigDecimal basePrice = new BigDecimal("1.50");
+
+            // 纯峰时时段测试 (10:00 - 11:00，系数 1.30 -> 单价 1.95，20 度 -> 39.00)
+            LocalDateTime peakStart = LocalDateTime.of(2026, 11, 7, 10, 0, 0);
+            LocalDateTime peakEnd = LocalDateTime.of(2026, 11, 7, 11, 0, 0);
+            BigDecimal peakCost = strategy.calculateCost(peakStart, peakEnd, new BigDecimal("20.00"), basePrice);
+            money(peakCost, "39.00");
+
+            // 纯平时时段测试 (14:00 - 15:00，系数 1.00 -> 单价 1.50，20 度 -> 30.00)
+            LocalDateTime flatStart = LocalDateTime.of(2026, 11, 7, 14, 0, 0);
+            LocalDateTime flatEnd = LocalDateTime.of(2026, 11, 7, 15, 0, 0);
+            BigDecimal flatCost = strategy.calculateCost(flatStart, flatEnd, new BigDecimal("20.00"), basePrice);
+            money(flatCost, "30.00");
+
+            // 纯谷时时段测试 (01:00 - 02:00，系数 0.60 -> 单价 0.90，20 度 -> 18.00)
+            LocalDateTime valleyStart = LocalDateTime.of(2026, 11, 7, 1, 0, 0);
+            LocalDateTime valleyEnd = LocalDateTime.of(2026, 11, 7, 2, 0, 0);
+            BigDecimal valleyCost = strategy.calculateCost(valleyStart, valleyEnd, new BigDecimal("20.00"), basePrice);
+            money(valleyCost, "18.00");
+
+            // 零电量防御
+            money(strategy.calculateCost(peakStart, peakEnd, BigDecimal.ZERO, basePrice), "0.00");
+        });
+        run("O-03", "独立月卡实体与历史办理台账追溯", () -> {
+            MonthlyCardDao cardDao = new MonthlyCardDaoImpl();
+            int beforeCount = cardDao.findByUserId(1).size();
+            BigDecimal beforeBalance = accounts.getAccount(1).getBalance();
+
+            LocalDateTime until = users.buyOrRenewMonthlyCard(1);
+            require(until != null && until.isAfter(LocalDateTime.now()), "月卡生效时间已延长");
+
+            BigDecimal afterBalance = accounts.getAccount(1).getBalance();
+            money(beforeBalance.subtract(afterBalance), "100.00");
+
+            List<MonthlyCard> history = users.getMonthlyCardHistory(1);
+            require(history.size() == beforeCount + 1, "生成新增月卡办理历史记录");
+            MonthlyCard latest = cardDao.findLatestByUserId(1);
+            require(latest != null && latest.getUserId() == 1, "匹配最新月卡台账");
+            money(latest.getPrice(), "100.00");
+            require("STANDARD".equals(latest.getCardType()), "卡种类型正确");
+            require(latest.getEndTime().equals(until), "台账到期时间与用户表一致");
+            audit(1);
+        }, MONEY, CARD, FLOW, "SELECT card_id, user_id, card_type, price, end_time FROM tb_monthly_card WHERE user_id = 1");
+        run("O-04", "充电位超时占位滞纳金核算", () -> {
+            StandardIdleFeeStrategy idleStrategy = new StandardIdleFeeStrategy();
+            LocalDateTime chargeEnd = LocalDateTime.of(2026, 11, 7, 12, 0, 0);
+
+            // 宽限期 15 分钟内免收
+            money(idleStrategy.calculateIdleFee(chargeEnd, chargeEnd.plusMinutes(10)), "0.00");
+            money(idleStrategy.calculateIdleFee(chargeEnd, chargeEnd.plusMinutes(15)), "0.00");
+
+            // 超出宽限期 (超期 20 分钟 * 0.50 元 = 10.00 元)
+            money(idleStrategy.calculateIdleFee(chargeEnd, chargeEnd.plusMinutes(35)), "10.00");
+
+            // 超长霸占封顶 (超期 185 分钟 * 0.50 元 = 92.50 元 -> 封顶 50.00 元)
+            money(idleStrategy.calculateIdleFee(chargeEnd, chargeEnd.plusMinutes(200)), "50.00");
+        });
+        run("O-05", "欠费挂账出场与历史补缴核心事务闭环", () -> {
+            entryTime(2, 1230);
+            money(accounts.getAccount(2).getBalance(), "50.00");
+
+            ParkingRecord arrearsRecord = parking.allowArrearsExit("川A66666", 2, "车主急事临时欠费挂账放行");
+            require(arrearsRecord != null && arrearsRecord.getExitTime() != null, "道闸放行抬杆且持久化出场时刻");
+            require(arrearsRecord.getPayStatus() == 0, "支付状态维持 0: 待支付挂账");
+            money(arrearsRecord.getTotalFee(), "80.00");
+            require(spots.findById(2).getSpotStatus() == 0, "车位已被正常释放");
+
+            List<ParkingRecord> arrearsList = parking.getArrearsByUserId(2);
+            require(arrearsList.stream().anyMatch(r -> r.getRecordId().equals(arrearsRecord.getRecordId())),
+                    "待补缴列表中包含该欠费工单");
+
+            expectInsufficient(() -> parking.payArrears(arrearsRecord.getRecordId(), 2));
+
+            accounts.recharge(2, bd("100.00"));
+            money(accounts.getAccount(2).getBalance(), "150.00");
+
+            ParkingRecord paidRecord = parking.payArrears(arrearsRecord.getRecordId(), 2);
+            require(paidRecord.getPayStatus() == 3, "状态翻转为 3: 已补缴出场 (PayStatus.OVERDUE_PAID)");
+            money(accounts.getAccount(2).getBalance(), "70.00");
+
+            List<ParkingRecord> afterArrears = parking.getArrearsByUserId(2);
+            require(afterArrears.stream().noneMatch(r -> r.getRecordId().equals(arrearsRecord.getRecordId())),
+                    "补缴后工单从待补缴列表中移除");
+            audit(2);
+        }, MONEY, PARK, FLOW);
+        run("O-06", "原生轻量连接池动态代理归还复用", () -> {
+            ConnectionPool pool = DBUtil.getPool();
+            require(pool != null, "DBUtil 连接池已成功挂载");
+            int initialActive = pool.getActiveCount();
+
+            Connection conn1 = pool.getConnection();
+            require(conn1 != null && !conn1.isClosed(), "获取有效代理连接");
+            require(pool.getActiveCount() == initialActive + 1, "借出后活跃连接数计数 +1");
+
+            try (Statement stmt = conn1.createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT 1")) {
+                require(rs.next() && rs.getInt(1) == 1, "连接正常执行 SQL");
+            }
+
+            conn1.close();
+            require(conn1.isClosed(), "代理连接对外展示为 isClosed = true");
+            require(pool.getActiveCount() == initialActive, "归还后活跃连接数自动扣减");
+
+            try {
+                conn1.createStatement();
+                require(false, "已归还连接禁止再次使用");
+            } catch (SQLException e) {
+                require(e.getMessage().contains("已归还"), "拦截非法复用");
+            }
+
+            Connection conn2 = pool.getConnection();
+            require(conn2 != null && !conn2.isClosed(), "再次获取到复用连接");
+            conn2.close();
         });
         boolean passed=RESULTS.stream().allMatch(r -> r.passed);
         StringBuilder tsv=new StringBuilder("id\tresult\ttitle\n");

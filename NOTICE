@@ -1,0 +1,17 @@
+ParkPilot (智泊领航) - Smart Parking & EV Charging Core Engine
+Copyright (c) 2026 Jiawei Huang (黄家威) <1507205727@qq.com>. All Rights Reserved.
+
+This product includes software developed by Jiawei Huang (黄家威).
+
+Project Details:
+- Project Name: ParkPilot (智泊领航)
+- Architecture: Pure Java SE + Native JDBC + High-Concurrency State Engine
+- Author & Copyright Holder: Jiawei Huang (黄家威)
+- Contact Email: 1507205727@qq.com
+
+License:
+This software is licensed under the PolyForm Noncommercial License 1.0.0.
+Noncommercial use is free of charge under the terms of the License.
+Any Commercial Use strictly requires a separate commercial license from Jiawei Huang.
+
+Please refer to LICENSE and COMMERCIAL.md for more details.

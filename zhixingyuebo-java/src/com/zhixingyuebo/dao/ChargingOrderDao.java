@@ -1,3 +1,13 @@
+/*
+ * Copyright (c) 2026 Jiawei Huang (黄家威). All Rights Reserved.
+ *
+ * Project: ParkPilot (智泊领航) - Smart Parking & EV Charging Core Engine
+ * Licensed under the PolyForm Noncommercial License 1.0.0 (the "License").
+ * You may not use this file except in compliance with the License.
+ *
+ * Commercial Use strictly requires a separate commercial license from the author.
+ * For commercial licensing, please refer to COMMERCIAL.md or contact: 1507205727@qq.com
+ */
 package com.zhixingyuebo.dao;
 
 import com.zhixingyuebo.entity.ChargingOrder;
@@ -32,6 +42,11 @@ public interface ChargingOrderDao extends BaseDao<ChargingOrder, Long> {
      * 回填结束充电拔枪数据并完成工单归档
      */
     int finishChargingOrder(Long orderId, LocalDateTime endTime, BigDecimal kwhAmount, BigDecimal totalCost, int orderStatus) throws SQLException;
+
+    /**
+     * 查询指定车牌最近一条已结算完成的充电工单
+     */
+    ChargingOrder findLatestFinishedOrderByPlate(String plateNumber) throws SQLException;
 
     /**
      * 查询指定用户的所有历史充电订单

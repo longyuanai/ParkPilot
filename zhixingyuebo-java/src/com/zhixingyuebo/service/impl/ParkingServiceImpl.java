@@ -1,3 +1,13 @@
+/*
+ * Copyright (c) 2026 Jiawei Huang (黄家威). All Rights Reserved.
+ *
+ * Project: ParkPilot (智泊领航) - Smart Parking & EV Charging Core Engine
+ * Licensed under the PolyForm Noncommercial License 1.0.0 (the "License").
+ * You may not use this file except in compliance with the License.
+ *
+ * Commercial Use strictly requires a separate commercial license from the author.
+ * For commercial licensing, please refer to COMMERCIAL.md or contact: 1507205727@qq.com
+ */
 package com.zhixingyuebo.service.impl;
 
 import com.zhixingyuebo.dao.*;
@@ -195,9 +205,21 @@ public class ParkingServiceImpl implements ParkingService {
             LocalDateTime exitTime = now();
             long minutes = DateUtil.calculateMinutes(record.getEntryTime(), exitTime);
             boolean monthlyFree = monthlyCardUntil != null && monthlyCardUntil.isAfter(exitTime);
-            BigDecimal totalFee = monthlyFree ? new BigDecimal("0.00")
+            BigDecimal baseParkingFee = monthlyFree ? new BigDecimal("0.00")
                     : DateUtil.calculateParkingFee(record.getEntryTime(), exitTime, hourlyRate);
-            int payStatus = monthlyFree ? 1 : 2;
+
+            // 核算充电专用位超时占位滞纳金（Idle Fee，拔枪超15分未挪车加收，对应任务书违规滞纳金）
+            BigDecimal idleFee = BigDecimal.ZERO;
+            if (spot.getSpotType() == 2) {
+                ChargingOrder finishedCharge = chargingOrderDao.findLatestFinishedOrderByPlate(vehicle.getPlateNumber());
+                if (finishedCharge != null && finishedCharge.getEndTime() != null
+                        && finishedCharge.getEndTime().isAfter(record.getEntryTime())) {
+                    idleFee = new com.zhixingyuebo.strategy.StandardIdleFeeStrategy()
+                            .calculateIdleFee(finishedCharge.getEndTime(), exitTime);
+                }
+            }
+            BigDecimal totalFee = baseParkingFee.add(idleFee);
+            int payStatus = (monthlyFree && idleFee.signum() == 0) ? 1 : 2;
 
             // 若可用余额不足，立即抛出受检异常，阻断抬杆放行（绝不产生单边账）
             if (account.getBalance().compareTo(totalFee) < 0) {
@@ -216,8 +238,10 @@ public class ParkingServiceImpl implements ParkingService {
             }
 
             // 2. 写入只读防篡改资金变动审计流水
+            String flowBizType = monthlyFree && idleFee.signum() == 0 ? "月卡免停"
+                    : (monthlyFree && idleFee.signum() > 0 ? "违规滞纳金" : "停车扣费");
             AccountFlow flow = new AccountFlow(null, vehicle.getUserId(), beforeBalance, afterBalance,
-                    totalFee.negate(), monthlyFree ? "月卡免停" : "停车扣费", exitTime);
+                    totalFee.negate(), flowBizType, exitTime);
             accountFlowDao.insert(flow);
 
             // 3. 将对应车位状态安全释放为 0: 空闲
@@ -374,6 +398,123 @@ public class ParkingServiceImpl implements ParkingService {
         } catch (Exception e) {
             DBUtil.rollbackTransaction();
             throw new ZhiXingYueBoException("修改车位状态异常: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public List<ParkingRecord> getArrearsByUserId(Integer userId) throws ZhiXingYueBoException {
+        try {
+            return parkingRecordDao.findArrearsByUserId(userId);
+        } catch (SQLException e) {
+            throw new ZhiXingYueBoException("查询欠费挂账记录失败: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public ParkingRecord payArrears(Long recordId, Integer userId) throws ZhiXingYueBoException {
+        try {
+            DBUtil.beginTransaction();
+            ParkingRecord record = parkingRecordDao.findByIdForUpdate(recordId);
+            if (record == null) {
+                throw new ZhiXingYueBoException("未找到该停车缴费单！");
+            }
+            if (record.getExitTime() == null) {
+                throw new ZhiXingYueBoException("车辆仍在场，请办理正常出场结算！");
+            }
+            if (record.getPayStatus() != 0) {
+                throw new ZhiXingYueBoException("该单据已结清，无需重复补缴！");
+            }
+            Vehicle vehicle = vehicleDao.findById(record.getVehicleId());
+            if (vehicle == null || !vehicle.getUserId().equals(userId)) {
+                throw new ZhiXingYueBoException("只能补缴本人名下车辆的欠费！");
+            }
+
+            BigDecimal fee = record.getTotalFee();
+            Account account = accountDao.findByIdForUpdate(userId);
+            if (account == null) {
+                throw new ZhiXingYueBoException("车主钱包账户未初始化！");
+            }
+            if (account.getBalance().compareTo(fee) < 0) {
+                throw new InsufficientBalanceException(account.getBalance(), fee);
+            }
+
+            BigDecimal beforeBalance = account.getBalance();
+            BigDecimal afterBalance = beforeBalance.subtract(fee);
+
+            if (fee.signum() > 0 && accountDao.deductBalance(userId, fee) != 1) {
+                throw new ZhiXingYueBoException("扣减钱包余额失败！");
+            }
+
+            // 写入审计流水
+            AccountFlow flow = new AccountFlow(null, userId, beforeBalance, afterBalance,
+                    fee.negate(), "补缴停车费", now());
+            accountFlowDao.insert(flow);
+
+            // 更新状态为 3: 已补缴出场
+            parkingRecordDao.updatePayStatus(recordId, 3);
+            record.setPayStatus(3);
+
+            DBUtil.commitTransaction();
+            return record;
+        } catch (InsufficientBalanceException e) {
+            DBUtil.rollbackTransaction();
+            throw e;
+        } catch (Exception e) {
+            DBUtil.rollbackTransaction();
+            throw new ZhiXingYueBoException("补缴停车欠费失败: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public ParkingRecord allowArrearsExit(String plateNumber, Integer userId, String reason) throws ZhiXingYueBoException {
+        try {
+            DBUtil.beginTransaction();
+            Vehicle vehicle = lockOwnedVehicle(plateNumber, userId);
+            ParkingRecord record = parkingRecordDao.findActiveRecordByVehicleId(vehicle.getVehicleId());
+            if (record == null) {
+                throw new ZhiXingYueBoException("未查询到车辆 [" + plateNumber + "] 的在场泊车记录！");
+            }
+            ParkingSpot spot = lockSpot(record.getSpotId());
+            ChargingPile pile = chargingPileDao.findBySpotIdForUpdate(spot.getSpotId());
+            if (chargingOrderDao.hasUnsettledOrderForPlate(vehicle.getPlateNumber())
+                    || (pile != null && chargingOrderDao.findActiveOrderByPileId(pile.getPileId()) != null)) {
+                throw new ZhiXingYueBoException("车位仍有未结算充电工单，请先拔枪结算！");
+            }
+
+            ParkingLot lot = parkingLotDao.findById(spot.getLotId());
+            BigDecimal hourlyRate = lot != null ? lot.getHourlyRate() : new BigDecimal("4.00");
+            LocalDateTime exitTime = now();
+            long minutes = DateUtil.calculateMinutes(record.getEntryTime(), exitTime);
+            BigDecimal baseParkingFee = DateUtil.calculateParkingFee(record.getEntryTime(), exitTime, hourlyRate);
+            BigDecimal idleFee = BigDecimal.ZERO;
+            if (spot.getSpotType() == 2) {
+                ChargingOrder finishedCharge = chargingOrderDao.findLatestFinishedOrderByPlate(vehicle.getPlateNumber());
+                if (finishedCharge != null && finishedCharge.getEndTime() != null
+                        && finishedCharge.getEndTime().isAfter(record.getEntryTime())) {
+                    idleFee = new com.zhixingyuebo.strategy.StandardIdleFeeStrategy()
+                            .calculateIdleFee(finishedCharge.getEndTime(), exitTime);
+                }
+            }
+            BigDecimal totalFee = baseParkingFee.add(idleFee);
+
+            // 释放车位
+            boolean maintenance = spot.getSpotStatus() == 3 || (pile != null && pile.getPileStatus() >= 3);
+            parkingSpotDao.updateStatus(spot.getSpotId(), maintenance ? 3 : 0);
+
+            // 回填单据，但标记 pay_status = 0 (挂账待补缴)
+            if (parkingRecordDao.finishParkingRecord(record.getRecordId(), exitTime, (int) minutes, totalFee, 0) != 1) {
+                throw new ZhiXingYueBoException("停车单已结算，无法重复欠费放行！");
+            }
+
+            DBUtil.commitTransaction();
+            record.setExitTime(exitTime);
+            record.setParkMinutes((int) minutes);
+            record.setTotalFee(totalFee);
+            record.setPayStatus(0);
+            return record;
+        } catch (Exception e) {
+            DBUtil.rollbackTransaction();
+            throw new ZhiXingYueBoException("应急欠费放行出场失败: " + e.getMessage(), e);
         }
     }
 }

@@ -1,16 +1,29 @@
+/*
+ * Copyright (c) 2026 Jiawei Huang (黄家威). All Rights Reserved.
+ *
+ * Project: ParkPilot (智泊领航) - Smart Parking & EV Charging Core Engine
+ * Licensed under the PolyForm Noncommercial License 1.0.0 (the "License").
+ * You may not use this file except in compliance with the License.
+ *
+ * Commercial Use strictly requires a separate commercial license from the author.
+ * For commercial licensing, please refer to COMMERCIAL.md or contact: 1507205727@qq.com
+ */
 package com.zhixingyuebo.service.impl;
 
 import com.zhixingyuebo.dao.AccountDao;
 import com.zhixingyuebo.dao.AccountFlowDao;
+import com.zhixingyuebo.dao.MonthlyCardDao;
 import com.zhixingyuebo.dao.UserDao;
 import com.zhixingyuebo.dao.VehicleDao;
 import com.zhixingyuebo.dao.impl.AccountDaoImpl;
 import com.zhixingyuebo.dao.impl.AccountFlowDaoImpl;
+import com.zhixingyuebo.dao.impl.MonthlyCardDaoImpl;
 import com.zhixingyuebo.dao.impl.UserDaoImpl;
 import com.zhixingyuebo.dao.impl.VehicleDaoImpl;
 import com.zhixingyuebo.entity.Account;
 import com.zhixingyuebo.entity.AccountFlow;
 import com.zhixingyuebo.entity.Admin;
+import com.zhixingyuebo.entity.MonthlyCard;
 import com.zhixingyuebo.entity.OwnerDriver;
 import com.zhixingyuebo.entity.User;
 import com.zhixingyuebo.entity.Vehicle;
@@ -36,6 +49,7 @@ public class UserServiceImpl implements UserService {
     private final VehicleDao vehicleDao = new VehicleDaoImpl();
     private final AccountDao accountDao = new AccountDaoImpl();
     private final AccountFlowDao accountFlowDao = new AccountFlowDaoImpl();
+    private final MonthlyCardDao monthlyCardDao = new MonthlyCardDaoImpl();
     private static final BigDecimal DEFAULT_MONTHLY_CARD_PRICE = new BigDecimal("100.00");
     private static final BigDecimal MAX_WALLET_AMOUNT = new BigDecimal("99999999.99");
 
@@ -148,6 +162,11 @@ public class UserServiceImpl implements UserService {
             AccountFlow flow = new AccountFlow(null, ownerId, beforeBalance, beforeBalance.subtract(price),
                     price.negate(), AccountFlow.MONTHLY_CARD_PAYMENT, now);
             if (accountFlowDao.insert(flow) != 1) throw new ZhiXingYueBoException("月卡流水写入失败。");
+
+            // 写入独立的月卡办理与续费历史台账（tb_monthly_card，完善 1:n 月卡实体）
+            MonthlyCard monthlyCard = new MonthlyCard(null, ownerId, "STANDARD", price, start, until, now);
+            monthlyCardDao.insert(monthlyCard);
+
             DBUtil.commitTransaction();
             return until;
         } catch (ZhiXingYueBoException e) {
@@ -156,6 +175,18 @@ public class UserServiceImpl implements UserService {
         } catch (Exception e) {
             DBUtil.rollbackTransaction();
             throw new ZhiXingYueBoException("月卡办理失败，事务已回滚: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public List<MonthlyCard> getMonthlyCardHistory(Integer userId) throws ZhiXingYueBoException {
+        if (userId == null) {
+            return java.util.Collections.emptyList();
+        }
+        try {
+            return monthlyCardDao.findByUserId(userId);
+        } catch (SQLException e) {
+            throw new ZhiXingYueBoException("查询月卡历史明细失败: " + e.getMessage(), e);
         }
     }
 

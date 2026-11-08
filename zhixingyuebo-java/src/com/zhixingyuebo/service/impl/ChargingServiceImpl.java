@@ -1,3 +1,13 @@
+/*
+ * Copyright (c) 2026 Jiawei Huang (黄家威). All Rights Reserved.
+ *
+ * Project: ParkPilot (智泊领航) - Smart Parking & EV Charging Core Engine
+ * Licensed under the PolyForm Noncommercial License 1.0.0 (the "License").
+ * You may not use this file except in compliance with the License.
+ *
+ * Commercial Use strictly requires a separate commercial license from the author.
+ * For commercial licensing, please refer to COMMERCIAL.md or contact: 1507205727@qq.com
+ */
 package com.zhixingyuebo.service.impl;
 
 import com.zhixingyuebo.dao.AccountDao;
@@ -188,8 +198,10 @@ public class ChargingServiceImpl implements ChargingService {
             BigDecimal settledKwh = manualKwh == null || measuredKwh.signum() > 0 ? measuredKwh : manualKwh;
             BigDecimal pricePerKwh = pile.getPricePerKwh();
 
-            // 计算实付总金额: kwhAmount * pricePerKwh
-            BigDecimal totalCost = settledKwh.multiply(pricePerKwh).setScale(2, RoundingMode.HALF_UP);
+            // 计算实付总金额: 委托 ChargingFeeStrategy 策略引擎计算
+            LocalDateTime endTime = LocalDateTime.now().withNano(0);
+            BigDecimal totalCost = com.zhixingyuebo.strategy.FeeStrategyFactory.getChargingFeeStrategy()
+                    .calculateCost(order.getStartTime(), endTime, settledKwh, pricePerKwh);
 
             // 检查车主钱包可用余额
             Account account = accountDao.findByIdForUpdate(order.getUserId());
@@ -213,7 +225,6 @@ public class ChargingServiceImpl implements ChargingService {
             }
 
             // 2. 写入审计黑匣子流水
-            LocalDateTime endTime = LocalDateTime.now().withNano(0);
             AccountFlow flow = new AccountFlow(null, order.getUserId(), beforeBalance, afterBalance, totalCost.negate(), "充电扣款", endTime);
             accountFlowDao.insert(flow);
 

@@ -1,3 +1,13 @@
+/*
+ * Copyright (c) 2026 Jiawei Huang (黄家威). All Rights Reserved.
+ *
+ * Project: ParkPilot (智泊领航) - Smart Parking & EV Charging Core Engine
+ * Licensed under the PolyForm Noncommercial License 1.0.0 (the "License").
+ * You may not use this file except in compliance with the License.
+ *
+ * Commercial Use strictly requires a separate commercial license from the author.
+ * For commercial licensing, please refer to COMMERCIAL.md or contact: 1507205727@qq.com
+ */
 package com.zhixingyuebo.dao.impl;
 
 import com.zhixingyuebo.dao.ParkingRecordDao;
@@ -211,6 +221,63 @@ public class ParkingRecordDaoImpl implements ParkingRecordDao {
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, id);
             return ps.executeUpdate();
+        } finally {
+            if (!DBUtil.isTransactionActive()) {
+                DBUtil.close(conn);
+            }
+        }
+    }
+
+    @Override
+    public List<ParkingRecord> findArrearsByUserId(Integer userId) throws SQLException {
+        String sql = "SELECT r.record_id, r.vehicle_id, r.spot_id, r.entry_time, r.exit_time, r.park_minutes, r.total_fee, r.pay_status " +
+                "FROM tb_parking_record r JOIN tb_vehicle v ON r.vehicle_id = v.vehicle_id " +
+                "WHERE v.user_id = ? AND r.exit_time IS NOT NULL AND r.pay_status = 0 ORDER BY r.record_id DESC";
+        List<ParkingRecord> list = new ArrayList<>();
+        Connection conn = DBUtil.getConnection();
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    list.add(mapRowToRecord(rs));
+                }
+            }
+            return list;
+        } finally {
+            if (!DBUtil.isTransactionActive()) {
+                DBUtil.close(conn);
+            }
+        }
+    }
+
+    @Override
+    public int updatePayStatus(Long recordId, int payStatus) throws SQLException {
+        String sql = "UPDATE tb_parking_record SET pay_status = ? WHERE record_id = ?";
+        Connection conn = DBUtil.getConnection();
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, payStatus);
+            ps.setLong(2, recordId);
+            return ps.executeUpdate();
+        } finally {
+            if (!DBUtil.isTransactionActive()) {
+                DBUtil.close(conn);
+            }
+        }
+    }
+
+    @Override
+    public ParkingRecord findByIdForUpdate(Long recordId) throws SQLException {
+        String sql = "SELECT record_id, vehicle_id, spot_id, entry_time, exit_time, park_minutes, total_fee, pay_status " +
+                "FROM tb_parking_record WHERE record_id = ? FOR UPDATE";
+        Connection conn = DBUtil.getConnection();
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, recordId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return mapRowToRecord(rs);
+                }
+                return null;
+            }
         } finally {
             if (!DBUtil.isTransactionActive()) {
                 DBUtil.close(conn);

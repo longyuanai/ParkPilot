@@ -1,3 +1,13 @@
+/*
+ * Copyright (c) 2026 Jiawei Huang (黄家威). All Rights Reserved.
+ *
+ * Project: ParkPilot (智泊领航) - Smart Parking & EV Charging Core Engine
+ * Licensed under the PolyForm Noncommercial License 1.0.0 (the "License").
+ * You may not use this file except in compliance with the License.
+ *
+ * Commercial Use strictly requires a separate commercial license from the author.
+ * For commercial licensing, please refer to COMMERCIAL.md or contact: 1507205727@qq.com
+ */
 package com.zhixingyuebo.service;
 
 import com.zhixingyuebo.entity.ParkingLot;
@@ -76,4 +86,19 @@ public interface ParkingService {
      * 修改车位状态（空闲、禁用等）
      */
     void updateSpotStatus(Integer spotId, int status) throws ZhiXingYueBoException;
+
+    /**
+     * 查询指定车主名下的已离场挂账欠费记录
+     */
+    List<ParkingRecord> getArrearsByUserId(Integer userId) throws ZhiXingYueBoException;
+
+    /**
+     * 车主线上补缴历史离场欠费（核心事务闭环：pay_status 翻转为 3: 已补缴出场）
+     */
+    ParkingRecord payArrears(Long recordId, Integer userId) throws ZhiXingYueBoException;
+
+    /**
+     * 应急欠费放行出场（车位立即释放，停车单标记为欠费挂账未结算 pay_status=0）
+     */
+    ParkingRecord allowArrearsExit(String plateNumber, Integer userId, String reason) throws ZhiXingYueBoException;
 }
